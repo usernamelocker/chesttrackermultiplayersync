@@ -5,7 +5,7 @@ services:
     container_name: cmsync
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "7000:8000"
     environment:
       EXPECTED_SERVER_ID: ${EXPECTED_SERVER_ID}
       SERVER_ID_ALIASES: ${SERVER_ID_ALIASES:-}
