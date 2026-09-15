@@ -1,0 +1,14 @@
+[Unit]
+Description=CMSync (ChestTracker multiplayer sync)
+After=network.target
+
+[Service]
+Type=simple
+User=cmsync
+WorkingDirectory=/opt/cmsync
+ExecStart=/opt/cmsync/.venv/bin/uvicorn app:app --host 127.0.0.1 --port 8000 --workers 2
+Restart=always
+EnvironmentFile=/opt/cmsync/.env
+
+[Install]
+WantedBy=multi-user.target

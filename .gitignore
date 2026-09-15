@@ -1,0 +1,18 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+server/data/
+server/backups/
+.DS_Store
+Thumbs.db
+# mod build outputs (when overlay is copied into a full mod checkout)
+build/
+run/
+.gradle/
+out/
+*.jar

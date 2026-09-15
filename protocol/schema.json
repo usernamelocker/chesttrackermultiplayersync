@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CMSync v2",
+  "type": "object",
+  "definitions": {
+    "identity": {
+      "type": "object",
+      "required": ["protocolVersion", "playerUuid", "playerName", "serverId", "serverName", "mcVersion", "modVersion"],
+      "properties": {
+        "protocolVersion": {"type": "integer", "const": 2},
+        "playerUuid": {"type": "string", "format": "uuid"},
+        "playerName": {"type": "string", "minLength": 1, "maxLength": 16},
+        "serverId": {"type": "string", "minLength": 1},
+        "serverName": {"type": "string"},
+        "mcVersion": {"type": "string", "examples": ["1.21.11", "26.1.2", "26.2"]},
+        "modVersion": {"type": "string"}
+      }
+    },
+    "normItem": {
+      "type": "object",
+      "required": ["id", "count"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9_.-]+:[a-z0-9_/.-]+$"},
+        "count": {"type": "integer", "minimum": 1},
+        "componentsDigest": {"type": "string"}
+      }
+    },
+    "change": {
+      "type": "object",
+      "required": ["key", "pos", "deleted", "updatedAt", "updatedBy", "mcVersion", "items"],
+      "properties": {
+        "key": {"type": "string"},
+        "pos": {"type": "string", "pattern": "^-?\\d+,-?\\d+,-?\\d+$"},
+        "deleted": {"type": "boolean"},
+        "updatedAt": {"type": "string", "format": "date-time"},
+        "updatedBy": {"type": "string", "format": "uuid"},
+        "mcVersion": {"type": "string"},
+        "items": {"type": "array", "items": {"$ref": "#/definitions/normItem"}},
+        "raw": {"type": "object"}
+      }
+    }
+  },
+  "properties": {
+    "push": {
+      "allOf": [
+        {"$ref": "#/definitions/identity"},
+        {
+          "type": "object",
+          "properties": {
+            "baseHash": {"type": ["string", "null"]},
+            "fullHash": {"type": "string"},
+            "changes": {"type": "array", "items": {"$ref": "#/definitions/change"}}
+          },
+          "required": ["fullHash", "changes"]
+        }
+      ]
+    }
+  }
+}
