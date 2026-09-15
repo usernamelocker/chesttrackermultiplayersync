@@ -29,6 +29,13 @@ You only fill in a small table of settings. Portainer pulls everything from GitH
 ## Connect the game (needs the mod built)
 
 1. In-game: `/cmsync status` → note the `server: [... ]` value, e.g. `multiplayer/mc_...`
+   - No mod yet? Pre-compute it: `multiplayer/` + the address **exactly as typed in
+     every player's server list**, with `.` and `:` replaced by `_`.
+     `play.example.com` → `multiplayer/play_example_com`;
+     `123.45.67.89:25565` → `multiplayer/123_45_67_89_25565`.
+   - WARNING: the port counts. If one player types `play.example.com` and another
+     types `play.example.com:25565`, they get different ids and won't share.
+     Everyone must type the address identically. When in doubt, trust `/cmsync status`.
 2. Back in Portainer → Stacks → `cmsync` → **Editor** tab → Environment variables →
    set `EXPECTED_SERVER_ID` to that exact value → **Update the stack** (Redeploy).
 3. In-game: `/cmsync gui` → paste `http://YOUR-VPS-IP:8000` → Connect →

@@ -18,7 +18,14 @@ and across MC versions (`1.21.11`, `26.1.2`, `26.2`).
 }
 ```
 
-* `serverId` is `Coordinate.id()` (`multiplayer/<ip_underscored>`, `singleplayer/<name>`, `realms/<id>`, `lan/...`).
+* `serverId` is `Coordinate.id()`. For multiplayer: `"multiplayer/" + sanitize(address)`,
+  where `sanitize` replaces every `. : / "` and vanilla illegal filename char with `_`
+  (JackFredLib `Sanitizer`, verified against source). Examples: `mc.hypixel.net` →
+  `multiplayer/mc_hypixel_net`; `123.45.67.89:25565` → `multiplayer/123_45_67_89_25565`.
+  The address is whatever each player typed in their server list, so the port counts:
+  `play.example.com` and `play.example.com:25565` are DIFFERENT ids — all players must
+  type the address identically. Singleplayer/LAN/realms use `singleplayer/<world>`,
+  `lan/<motd>`, `realms/<hex>` instead.
   Server compares this against `EXPECTED_SERVER_ID`. Hub/lobby connections use a different `serverId`
   and must be rejected/ignored by config.
 * `mcVersion` + `modVersion` drive cross-version normalization (see `normalization.md`).
