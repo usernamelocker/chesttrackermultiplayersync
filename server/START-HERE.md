@@ -13,7 +13,9 @@ You only fill in a small table of settings. Portainer pulls everything from GitH
    - Turn ON **Repository authentication** (the repo is private) and enter your GitHub
      username + a token/password. Any token with `repo` read access works.
 3. Scroll to **Environment variables** and add (copy the names letter for letter):
-   - `EXPECTED_SERVER_ID` → for now type `TEMP` (you'll replace it below, it must match the game exactly)
+   - `EXPECTED_SERVER_ID` → for now type `TEMP` (you'll replace it below, it must match the game exactly).
+     While it's `TEMP`, every game connection is denied on purpose — nothing can sync yet,
+     but `/health` still answers so you can prove the deploy works.
    - Token mode (what you asked for): leave `WHITELIST_UUIDS` **empty**, set
      `SHARED_TOKEN` to a long random password (e.g. 24+ random letters/numbers).
      Everyone who knows it can sync — no UUID list needed.
