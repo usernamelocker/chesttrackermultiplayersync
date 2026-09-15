@@ -50,7 +50,8 @@ def health():
 def handshake(req: HandshakeRequest, x_cmsync_token: str | None = Header(default=None, alias="X-CMSync-Token")):
     if req.protocolVersion != 2:
         raise HTTPException(400, "unsupported protocolVersion")
-    if config.EXPECTED_SERVER_ID and req.serverId != config.EXPECTED_SERVER_ID:
+    sid = config.canonical_server_id(req.serverId)
+    if config.EXPECTED_SERVER_ID and sid != config.EXPECTED_SERVER_ID:
         return {"status": "ACCESS_DENIED", "reason": "wrong serverId"}
     denied = _gate(req.playerUuid, x_cmsync_token)
     if denied:
@@ -62,7 +63,8 @@ def push(req: PushRequest, x_cmsync_token: str | None = Header(default=None, ali
     # access check per request (no sessions)
     if req.protocolVersion != 2:
         raise HTTPException(400, "unsupported protocolVersion")
-    if config.EXPECTED_SERVER_ID and req.serverId != config.EXPECTED_SERVER_ID:
+    sid = config.canonical_server_id(req.serverId)
+    if config.EXPECTED_SERVER_ID and sid != config.EXPECTED_SERVER_ID:
         return _deny("wrong serverId")
     try:
         denied = _gate(req.playerUuid, x_cmsync_token)
@@ -73,7 +75,7 @@ def push(req: PushRequest, x_cmsync_token: str | None = Header(default=None, ali
 
     changes = [c.model_dump() for c in req.changes]
     with _con() as con:
-        existing = db.container_count(con, req.serverId)
+        existing = db.container_count(con, sid)
         deletes = sum(1 for c in changes if c.get("deleted"))
 
         # Hub-wipe protection: empty push against non-empty server = ignore, keep snapshot.
@@ -84,15 +86,15 @@ def push(req: PushRequest, x_cmsync_token: str | None = Header(default=None, ali
         # Mass-delete guard: quarantine, snapshot first, do not apply deletes.
         if db.should_quarantine_mass_delete(existing, deletes,
                                             config.MAX_DELETE_FRACTION, config.MAX_DELETE_COUNT):
-            snap_id = db.take_snapshot(con, req.serverId, config.SNAPSHOT_KEEP)
+            snap_id = db.take_snapshot(con, sid, config.SNAPSHOT_KEEP)
             return JSONResponse({"status": "QUARANTINED",
                                  "reason": f"mass delete: {deletes} deletes vs {existing} stored",
                                  "snapshotId": snap_id, "containers": existing})
 
         # v1-compat: full-snapshot posts arrive as PushRequest with many upserts; LWW handles them.
-        res = db.apply_changes(con, req.serverId, changes)
-        _maybe_snapshot(con, req.serverId)
-        res.update({"status": "SYNCED", "containers": db.container_count(con, req.serverId)})
+        res = db.apply_changes(con, sid, changes)
+        _maybe_snapshot(con, sid)
+        res.update({"status": "SYNCED", "containers": db.container_count(con, sid)})
         return res
 
 def _maybe_snapshot(con, server_id: str) -> None:
@@ -107,13 +109,14 @@ def _maybe_snapshot(con, server_id: str) -> None:
 def pull(serverId: str = Query(...), since: str | None = Query(default=None),
          playerUuid: str = Query(...),
          x_cmsync_token: str | None = Header(default=None, alias="X-CMSync-Token")):
-    if config.EXPECTED_SERVER_ID and serverId != config.EXPECTED_SERVER_ID:
+    sid = config.canonical_server_id(serverId)
+    if config.EXPECTED_SERVER_ID and sid != config.EXPECTED_SERVER_ID:
         return {"status": "ACCESS_DENIED", "reason": "wrong serverId"}
     denied = _gate(playerUuid, x_cmsync_token)
     if denied:
         return denied
     with _con() as con:
-        state = db.full_state(con, serverId)
+        state = db.full_state(con, sid)
         changes = []
         for key, positions in state.items():
             for pos, mem in positions.items():
@@ -121,7 +124,7 @@ def pull(serverId: str = Query(...), since: str | None = Query(default=None),
                     continue
                 changes.append({"key": key, "pos": pos, "deleted": False, **mem})
         tombs = [dict(r) for r in con.execute(
-            "SELECT key,pos,deleted_at FROM tombstones WHERE server_id=?", (serverId,))]
+            "SELECT key,pos,deleted_at FROM tombstones WHERE server_id=?", (sid,))]
         return {"status": "SYNCED", "serverTime": time.time(), "cursor": since or "",
                 "changes": changes, "tombstones": tombs,
                 "containers": sum(len(v) for v in state.values())}
@@ -129,27 +132,28 @@ def pull(serverId: str = Query(...), since: str | None = Query(default=None),
 @app.get("/api/view/{server_id:path}")
 def view(server_id: str):
     """Website/Discord read model: aggregated counts from normalized items."""
+    sid = config.canonical_server_id(server_id)
     with _con() as con:
-        state = db.full_state(con, server_id)
+        state = db.full_state(con, sid)
     totals: dict[str, int] = {}
     for positions in state.values():
         for mem in positions.values():
             for it in mem.get("items", []):
                 totals[it["id"]] = totals.get(it["id"], 0) + int(it.get("count", 0))
-    return {"serverId": server_id, "containers": sum(len(v) for v in state.values()),
+    return {"serverId": sid, "containers": sum(len(v) for v in state.values()),
             "totals": totals, "keys": list(state.keys())}
 
 @app.get("/api/snapshots")
 def snapshots(serverId: str):
     with _con() as con:
-        return {"snapshots": db.list_snapshots(con, serverId)}
+        return {"snapshots": db.list_snapshots(con, config.canonical_server_id(serverId))}
 
 @app.post("/api/restore")
 def restore(body: dict, x_cmsync_token: str | None = Header(default=None, alias="X-CMSync-Token")):
     if config.ADMIN_TOKEN and x_cmsync_token != config.ADMIN_TOKEN:
         raise HTTPException(401, "admin only")
     with _con() as con:
-        n = db.restore_snapshot(con, body["serverId"], int(body["snapshotId"]))
+        n = db.restore_snapshot(con, config.canonical_server_id(body["serverId"]), int(body["snapshotId"]))
         return {"status": "SYNCED", "restored": n}
 
 # v1 compat: QMSync POST /api/sync full snapshot -> diff into deltas is client-driven;
@@ -159,7 +163,8 @@ def sync_v1(body: dict, x_cmsync_token: str | None = Header(default=None, alias=
     ident_keys = ("playerUuid", "serverId")
     if not all(k in body for k in ident_keys):
         raise HTTPException(400, "bad v1 payload")
-    if config.EXPECTED_SERVER_ID and body.get("serverId") != config.EXPECTED_SERVER_ID:
+    sid = config.canonical_server_id(body.get("serverId", ""))
+    if config.EXPECTED_SERVER_ID and sid != config.EXPECTED_SERVER_ID:
         return {"status": "ACCESS_DENIED"}
     # NOTE: v1 has no token header; in token mode (whitelist empty + SHARED_TOKEN
     # set) v1 clients are rejected — token mode needs the cmsync overlay client.
@@ -182,6 +187,6 @@ def sync_v1(body: dict, x_cmsync_token: str | None = Header(default=None, alias=
                             "updatedBy": body.get("playerUuid"), "mcVersion": body.get("mcVersion", "v1"),
                             "items": norm, "raw": mem})
     with _con() as con:
-        res = db.apply_changes(con, body["serverId"], changes)
+        res = db.apply_changes(con, sid, changes)
         res.update({"status": "SYNCED"})
         return res

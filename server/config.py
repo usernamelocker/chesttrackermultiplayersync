@@ -21,6 +21,16 @@ def _CSV(name: str) -> set[str]:
     return {p.strip() for p in raw.split(",") if p.strip()}
 
 EXPECTED_SERVER_ID = os.environ.get("EXPECTED_SERVER_ID", "")
+# Extra addresses for the SAME proxy/network, merged into the canonical bank above.
+# e.g. players joining via fabriccraft.net AND vip.fabriccraft.net share one bank.
+SERVER_ID_ALIASES: set[str] = _CSV("SERVER_ID_ALIASES")
+
+
+def canonical_server_id(server_id: str) -> str:
+    """Map a known alias to the canonical id; unknown ids pass through (then denied)."""
+    if server_id in SERVER_ID_ALIASES:
+        return EXPECTED_SERVER_ID
+    return server_id
 WHITELIST_UUIDS: set[str] = _CSV("WHITELIST_UUIDS")
 SHARED_TOKEN = os.environ.get("SHARED_TOKEN", "")
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "") or SHARED_TOKEN

@@ -111,4 +111,30 @@ r = c.get("/api/pull", params={"serverId": SID, "playerUuid": STRANGER}, headers
 assert r["status"] == "SYNCED" and any(x["pos"] == "9,9,9" for x in r["changes"]), r
 print("token mode ok")
 
+# --- alias mode: second proxy address merges into the canonical bank ---
+CANON = "multiplayer/fabriccraft_net"
+ALIAS = "multiplayer/vip_fabriccraft_net"
+config.EXPECTED_SERVER_ID = CANON
+config.SERVER_ID_ALIASES = {ALIAS}
+
+
+def fident(uuid, sid):
+    d = ident(uuid)
+    d["serverId"] = sid
+    return d
+
+
+r = c.post("/api/handshake", json=fident(STRANGER, ALIAS), headers=TOK).json()
+assert r["status"] == "SYNCED", r  # alias accepted, not "wrong serverId"
+r = c.post("/api/handshake", json=fident(STRANGER, "multiplayer/stranger_server"), headers=TOK).json()
+assert r["status"] == "ACCESS_DENIED", r  # unknown ids still denied
+r = c.post("/api/push", json=dict(fident(STRANGER, ALIAS), fullHash="a1", changes=[
+    change("minecraft:overworld", "7,7,7", 14, diamond, uuid=STRANGER)]), headers=TOK).json()
+assert r["status"] == "SYNCED" and r["applied"] == 1, r
+r = c.get(f"/api/view/{CANON}").json()
+assert r["totals"].get("minecraft:diamond", 0) >= 2, r  # stored under canonical id
+r = c.get("/api/pull", params={"serverId": ALIAS, "playerUuid": STRANGER}, headers=TOK).json()
+assert r["status"] == "SYNCED" and any(x["pos"] == "7,7,7" for x in r["changes"]), r
+print("alias mode ok")
+
 print("ALL API TESTS PASSED")

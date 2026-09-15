@@ -13,13 +13,17 @@ You only fill in a small table of settings. Portainer pulls everything from GitH
    - Turn ON **Repository authentication** (the repo is private) and enter your GitHub
      username + a token/password. Any token with `repo` read access works.
 3. Scroll to **Environment variables** and add (copy the names letter for letter):
-   - `EXPECTED_SERVER_ID` → for now type `TEMP` (you'll replace it below, it must match the game exactly).
-     While it's `TEMP`, every game connection is denied on purpose — nothing can sync yet,
-     but `/health` still answers so you can prove the deploy works.
+   - `EXPECTED_SERVER_ID` → `multiplayer/fabriccraft_net` (already the default — this is
+     `fabriccraft.net` with dots as underscores; tell all players to join via exactly
+     `fabriccraft.net`, no port, so everyone lands in one bank)
+   - `SERVER_ID_ALIASES` → `multiplayer/vip_fabriccraft_net` (safety net: players who join
+     via `vip.fabriccraft.net` merge into the same bank instead of a split one)
    - Token mode (what you asked for): leave `WHITELIST_UUIDS` **empty**, set
      `SHARED_TOKEN` to a long random password (e.g. 24+ random letters/numbers).
      Everyone who knows it can sync — no UUID list needed.
    - Leave everything else alone — all the other settings already have safe defaults.
+   - While `EXPECTED_SERVER_ID` is `TEMP`, every game connection is denied on purpose —
+     nothing can sync yet, but `/health` still answers so you can prove the deploy works.
 4. Click **Deploy the stack**. Then Containers → click `cmsync` → **Logs**.
    Wait until you see `Uvicorn running on ... port 8000`. That means it's alive.
 5. In your browser open `http://YOUR-VPS-IP:8000/health`
@@ -28,14 +32,12 @@ You only fill in a small table of settings. Portainer pulls everything from GitH
 
 ## Connect the game (needs the mod built)
 
-1. In-game: `/cmsync status` → note the `server: [... ]` value, e.g. `multiplayer/mc_...`
-   - No mod yet? Pre-compute it: `multiplayer/` + the address **exactly as typed in
-     every player's server list**, with `.` and `:` replaced by `_`.
-     `play.example.com` → `multiplayer/play_example_com`;
-     `123.45.67.89:25565` → `multiplayer/123_45_67_89_25565`.
-   - WARNING: the port counts. If one player types `play.example.com` and another
-     types `play.example.com:25565`, they get different ids and won't share.
-     Everyone must type the address identically. When in doubt, trust `/cmsync status`.
+1. In-game: `/cmsync status` → the `server: [... ]` value should read
+   `multiplayer/fabriccraft_net` (or `multiplayer/vip_fabriccraft_net` — both merge).
+   If it shows something else (e.g. with `_25565` from an explicit port), tell players
+   to join via bare `fabriccraft.net` and update the env var to match.
+   - Rule: `multiplayer/` + address exactly as typed in each player's server list,
+     with `.` and `:` as `_`. The port counts, so keep everyone on the identical address.
 2. Back in Portainer → Stacks → `cmsync` → **Editor** tab → Environment variables →
    set `EXPECTED_SERVER_ID` to that exact value → **Update the stack** (Redeploy).
 3. In-game: `/cmsync gui` → paste `http://YOUR-VPS-IP:8000` → Connect →

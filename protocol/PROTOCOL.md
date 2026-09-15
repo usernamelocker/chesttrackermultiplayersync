@@ -26,6 +26,9 @@ and across MC versions (`1.21.11`, `26.1.2`, `26.2`).
   `play.example.com` and `play.example.com:25565` are DIFFERENT ids — all players must
   type the address identically. Singleplayer/LAN/realms use `singleplayer/<world>`,
   `lan/<motd>`, `realms/<hex>` instead.
+  Proxy networks (same server, several addresses): list the extra ids in
+  `SERVER_ID_ALIASES` and the server canonicalizes them into `EXPECTED_SERVER_ID`,
+  so all addresses share one bank instead of splitting.
   Server compares this against `EXPECTED_SERVER_ID`. Hub/lobby connections use a different `serverId`
   and must be rejected/ignored by config.
 * `mcVersion` + `modVersion` drive cross-version normalization (see `normalization.md`).
