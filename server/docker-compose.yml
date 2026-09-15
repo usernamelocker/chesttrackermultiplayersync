@@ -19,7 +19,8 @@ services:
       TOMBSTONE_TTL_DAYS: ${TOMBSTONE_TTL_DAYS:-30}
     volumes:
       - cmsync-data:/data
-      - ./backups:/app/backups
+      - cmsync-backups:/app/backups
 
 volumes:
   cmsync-data:
+  cmsync-backups:

@@ -3,14 +3,14 @@
 ## Done
 
 * **Server** (`server/`): FastAPI + SQLite, `handshake/push/pull/view/snapshots/restore/health` + v1 compat.
-  Tests pass: `python test_server.py` → lww/guard/snapshot ok.
+  Tests pass: `python test_server.py` → lww/guard/snapshot ok; `python test_api.py` → full e2e ok.
 * **Merge safety**: per-container LWW, tombstones, empty-push ignore (hub-wipe), mass-delete quarantine
   server + local hold, auto snapshots every 15min + `backup.py`.
 * **Client overlay** (`client/overlay/.../cmsync/`, 7 files): Settings sidecar, Http v2, **Queue lane**
   (1 thread, coalesce, client thread only copies), Manager (push+pull), Command
   (`connect/gui/stop/status`), **Screen** (`/cmsync gui` URL+token boxes — answers token UI question).
-* **Deploy**: `Dockerfile`, `portainer-stack.yml` (paste, no edit), `stack.env.example`,
-  `START-HERE.md` (5 clicks), `docker-compose.yml`, systemd + nginx examples.
+* **Deploy**: `Dockerfile`, `docker-compose.yml` (Portainer Repository build), `stack.env.example`,
+  `START-HERE.md` (exact clicks), systemd + nginx examples.
 * **Docs**: `protocol/` (v2 + schema + cross-version rule), `docs/` (architecture/testing/backups/tokens),
   `PORTING-26x.md`, `APPLY.md`, `scripts/apply-overlay.ps1`.
 
@@ -20,7 +20,7 @@
   Can't build jar in this meta-repo (no MC deps vendored on purpose).
 * Native tab inside EditMemoryBankScreen (v1 uses standalone `/cmsync gui` screen instead — simpler, version-proof).
 * 26.1.2/26.2 branch builds (same overlay, see porting doc).
-* Public/private GitHub push (local only right now, no remote).
+* Live Portainer deploy (repo is on GitHub private; needs your 2 env vars + Deploy click).
 
 ## Your 3 inputs needed to go live
 
