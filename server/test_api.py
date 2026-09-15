@@ -89,4 +89,26 @@ assert r["status"] == "SYNCED" and r["restored"] == 2, r
 assert c.get(f"/api/view/{SID}").json()["containers"] == 2
 print("restore ok")
 
+# --- token mode: whitelist empty, password required instead of UUIDs ---
+import config  # noqa: E402
+
+config.WHITELIST_UUIDS = set()
+config.SHARED_TOKEN = "test-secret"
+config.ADMIN_TOKEN = "test-secret"
+TOK = {"X-CMSync-Token": "test-secret"}
+STRANGER = "99999999-9999-9999-9999-999999999999"
+
+r = c.post("/api/handshake", json=ident(STRANGER))
+assert r.status_code == 401, (r.status_code, r.text)
+r = c.post("/api/handshake", json=ident(STRANGER), headers={"X-CMSync-Token": "wrong"})
+assert r.status_code == 401, (r.status_code, r.text)
+r = c.post("/api/handshake", json=ident(STRANGER), headers=TOK).json()
+assert r["status"] == "SYNCED", r  # unknown UUID allowed: whitelist skipped
+r = c.post("/api/push", json=dict(ident(STRANGER), fullHash="t1", changes=[
+    change("minecraft:overworld", "9,9,9", 13, iron, uuid=STRANGER)]), headers=TOK).json()
+assert r["status"] == "SYNCED" and r["applied"] == 1, r
+r = c.get("/api/pull", params={"serverId": SID, "playerUuid": STRANGER}, headers=TOK).json()
+assert r["status"] == "SYNCED" and any(x["pos"] == "9,9,9" for x in r["changes"]), r
+print("token mode ok")
+
 print("ALL API TESTS PASSED")

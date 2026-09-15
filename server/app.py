@@ -23,15 +23,19 @@ def _con():
     finally:
         con.close()
 
-def _check_identity(ident, token: str | None) -> None:
-    if ident.protocolVersion != 2:
-        raise HTTPException(400, "unsupported protocolVersion (want 2)")
-    if config.EXPECTED_SERVER_ID and ident.serverId != config.EXPECTED_SERVER_ID:
-        raise HTTPException(200, "wrong server")  # handled as ACCESS_DENIED below
-    if ident.playerUuid not in config.WHITELIST_UUIDS:
-        raise HTTPException(200, "not whitelisted")
+def _gate(player_uuid: str | None, token: str | None):
+    """Shared access check. Returns an ACCESS_DENIED dict, raises 401 on bad
+    token, or None if allowed.
+
+    Two modes (see .env.example):
+    * UUID mode: WHITELIST_UUIDS set -> only those UUIDs in (token optional extra).
+    * Token mode: WHITELIST_UUIDS empty -> whitelist skipped, SHARED_TOKEN required.
+    """
+    if config.WHITELIST_UUIDS and player_uuid not in config.WHITELIST_UUIDS:
+        return {"status": "ACCESS_DENIED", "reason": "not whitelisted"}
     if config.SHARED_TOKEN and token != config.SHARED_TOKEN:
         raise HTTPException(401, "bad token")
+    return None
 
 def _deny(reason: str, status: int = 200):
     if status == 401:
@@ -48,10 +52,9 @@ def handshake(req: HandshakeRequest, x_cmsync_token: str | None = Header(default
         raise HTTPException(400, "unsupported protocolVersion")
     if config.EXPECTED_SERVER_ID and req.serverId != config.EXPECTED_SERVER_ID:
         return {"status": "ACCESS_DENIED", "reason": "wrong serverId"}
-    if req.playerUuid not in config.WHITELIST_UUIDS:
-        return {"status": "ACCESS_DENIED", "reason": "not whitelisted"}
-    if config.SHARED_TOKEN and x_cmsync_token != config.SHARED_TOKEN:
-        raise HTTPException(401, "bad token")
+    denied = _gate(req.playerUuid, x_cmsync_token)
+    if denied:
+        return denied
     return {"status": "SYNCED"}
 
 @app.post("/api/push")
@@ -61,10 +64,12 @@ def push(req: PushRequest, x_cmsync_token: str | None = Header(default=None, ali
         raise HTTPException(400, "unsupported protocolVersion")
     if config.EXPECTED_SERVER_ID and req.serverId != config.EXPECTED_SERVER_ID:
         return _deny("wrong serverId")
-    if req.playerUuid not in config.WHITELIST_UUIDS:
-        return _deny("not whitelisted")
-    if config.SHARED_TOKEN and x_cmsync_token != config.SHARED_TOKEN:
+    try:
+        denied = _gate(req.playerUuid, x_cmsync_token)
+    except HTTPException:
         return _deny("bad token", 401)
+    if denied:
+        return denied
 
     changes = [c.model_dump() for c in req.changes]
     with _con() as con:
@@ -104,10 +109,9 @@ def pull(serverId: str = Query(...), since: str | None = Query(default=None),
          x_cmsync_token: str | None = Header(default=None, alias="X-CMSync-Token")):
     if config.EXPECTED_SERVER_ID and serverId != config.EXPECTED_SERVER_ID:
         return {"status": "ACCESS_DENIED", "reason": "wrong serverId"}
-    if playerUuid not in config.WHITELIST_UUIDS:
-        return {"status": "ACCESS_DENIED", "reason": "not whitelisted"}
-    if config.SHARED_TOKEN and x_cmsync_token != config.SHARED_TOKEN:
-        raise HTTPException(401, "bad token")
+    denied = _gate(playerUuid, x_cmsync_token)
+    if denied:
+        return denied
     with _con() as con:
         state = db.full_state(con, serverId)
         changes = []
@@ -151,13 +155,18 @@ def restore(body: dict, x_cmsync_token: str | None = Header(default=None, alias=
 # v1 compat: QMSync POST /api/sync full snapshot -> diff into deltas is client-driven;
 # accept raw v1 payload here so old 1.21.11-only clients don't 404.
 @app.post("/api/sync")
-def sync_v1(body: dict):
+def sync_v1(body: dict, x_cmsync_token: str | None = Header(default=None, alias="X-CMSync-Token")):
     ident_keys = ("playerUuid", "serverId")
     if not all(k in body for k in ident_keys):
         raise HTTPException(400, "bad v1 payload")
     if config.EXPECTED_SERVER_ID and body.get("serverId") != config.EXPECTED_SERVER_ID:
         return {"status": "ACCESS_DENIED"}
-    if body.get("playerUuid") not in config.WHITELIST_UUIDS:
+    # NOTE: v1 has no token header; in token mode (whitelist empty + SHARED_TOKEN
+    # set) v1 clients are rejected — token mode needs the cmsync overlay client.
+    try:
+        if _gate(body.get("playerUuid"), x_cmsync_token):
+            return {"status": "ACCESS_DENIED"}
+    except HTTPException:
         return {"status": "ACCESS_DENIED"}
     # v1 carries full `data`; without per-entry timestamps we store as-is with now.
     import datetime

@@ -8,7 +8,7 @@ services:
       - "8000:8000"
     environment:
       EXPECTED_SERVER_ID: ${EXPECTED_SERVER_ID}
-      WHITELIST_UUIDS: ${WHITELIST_UUIDS}
+      WHITELIST_UUIDS: ${WHITELIST_UUIDS:-}
       SHARED_TOKEN: ${SHARED_TOKEN:-}
       ADMIN_TOKEN: ${ADMIN_TOKEN:-}
       DB_PATH: /data/cmsync.db
