@@ -26,6 +26,7 @@ public class CMSyncCommand {
     public static void register() {
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> dispatcher.register(
                 ClientCommandManager.literal("cmsync")
+                        .executes(ctx -> help(ctx.getSource()))
                         .then(ClientCommandManager.literal("connect")
                                 .then(ClientCommandManager.argument("url", StringArgumentType.greedyString())
                                         .executes(ctx -> connect(ctx.getSource(), StringArgumentType.getString(ctx, "url"), null))))
@@ -36,6 +37,12 @@ public class CMSyncCommand {
                         .then(ClientCommandManager.literal("status")
                                 .executes(ctx -> status(ctx.getSource())))
         ));
+    }
+
+    private static int help(FabricClientCommandSource source) {
+        source.sendFeedback(Component.literal("CMSync: /cmsync connect <url> [token] | /cmsync gui | /cmsync status | /cmsync stop")
+                .withStyle(ChatFormatting.GRAY));
+        return 1;
     }
 
     private static int gui(FabricClientCommandSource source) {

@@ -7,6 +7,11 @@ import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import red.jackf.chesttracker.impl.memory.MemoryBankAccessImpl;
+import red.jackf.chesttracker.impl.memory.MemoryBankImpl;
+import red.jackf.jackfredlib.client.api.gps.Coordinate;
+
+import java.net.URI;
+import java.util.Optional;
 
 /**
  * Simple vanilla setup screen: URL + token boxes, Connect/Stop buttons, status line.
@@ -61,19 +66,60 @@ public class CMSyncScreen extends Screen {
     private void onConnect() {
         String url = urlBox.getValue().strip();
         String token = tokenBox.getValue().strip();
-        if (CMSyncHttp.parseBaseUrl(url) == null) {
+        URI parsed = CMSyncHttp.parseBaseUrl(url);
+        if (parsed == null) {
             status = "bad URL (need http:// or https://)";
             return;
         }
-        CMSyncSettings s = CMSyncSettings.load(bankId);
-        s.url = url;
-        s.token = token.isEmpty() ? null : token;
-        s.enabled = true;
-        s.paused = false;
-        // boundServerId filled on next tick from Coordinate; set loosely here
-        s.save(bankId);
-        MemoryBankAccessImpl.INSTANCE.save();
-        status = "saved — handshake runs on next tick (/cmsync status to confirm)";
+        Optional<MemoryBankImpl> bankOpt = MemoryBankAccessImpl.INSTANCE.getLoadedInternal();
+        Optional<Coordinate> coordOpt = Coordinate.getCurrent();
+        Minecraft mc = Minecraft.getInstance();
+        if (bankOpt.isEmpty() || coordOpt.isEmpty() || mc.player == null
+                || !bankOpt.get().getId().equals(bankId)) {
+            status = "join your server first, then reopen this screen";
+            return;
+        }
+        final String tokenOrNull = token.isEmpty() ? null : token;
+        final Coordinate coord = coordOpt.get();
+        CMSyncHttp.Identity ident = new CMSyncHttp.Identity(
+                mc.player.getUUID().toString(),
+                mc.player.getName().getString(),
+                coord.id(), coord.userFriendlyName(),
+                gameVersion(), "cmsync.1");
+        status = "contacting server…";
+        // handshake FIRST like /cmsync connect does — only save on SYNCED, so a typo'd
+        // URL/token can never silently activate syncing
+        CMSyncHttp.handshake(parsed.toString(), tokenOrNull, ident).whenComplete((r, t) ->
+                mc.execute(() -> {
+                    CMSyncHttp.Result res = t != null ? CMSyncHttp.Result.CONNECTION_FAILED : r;
+                    if (res == CMSyncHttp.Result.SYNCED) {
+                        Optional<MemoryBankImpl> cur = MemoryBankAccessImpl.INSTANCE.getLoadedInternal();
+                        if (cur.isEmpty() || !cur.get().getId().equals(bankId)) {
+                            status = "world changed — reopen and retry";
+                            return;
+                        }
+                        CMSyncSettings s = CMSyncSettings.load(bankId);
+                        s.url = parsed.toString();
+                        s.token = tokenOrNull;
+                        s.enabled = true;
+                        s.paused = false;
+                        s.boundServerId = coord.id();
+                        s.save(bankId);
+                        CMSyncManager.INSTANCE.markActivated(bankId, coord.id());
+                        MemoryBankAccessImpl.INSTANCE.save();
+                        status = "SYNCED (" + coord.id() + ") — Done to close";
+                    } else {
+                        status = "failed: " + res + " — check URL/token, retry";
+                    }
+                }));
+    }
+
+    private static String gameVersion() {
+        try {
+            return net.minecraft.SharedConstants.getCurrentVersion().name();
+        } catch (Throwable t) {
+            return "unknown";
+        }
     }
 
     private void onStop() {

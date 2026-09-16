@@ -51,6 +51,11 @@ assert c.post("/api/handshake", json=ident("99999999-9999-9999-9999-999999999999
 assert c.post("/api/handshake", json=ident(ALICE, sid="multiplayer/other")).json()["status"] == "ACCESS_DENIED"
 print("handshake ok")
 
+r = c.post("/api/push", json={"protocolVersion": 2})
+assert r.status_code == 422, (r.status_code, r.text)
+assert isinstance(r.json().get("detail"), list), r.text
+print("422 shape ok (validation detail preserved for logs)")
+
 iron = [{"id": "minecraft:iron_ingot", "count": 5}]
 diamond = [{"id": "minecraft:diamond", "count": 2}]
 body = dict(ident(ALICE), fullHash="h1", changes=[

@@ -48,6 +48,11 @@ public class CMSyncManager {
     private int lastPushedCount = -1;
     private boolean failing = false;
     private long lastAttemptMs = 0;
+    // Deterministic server rejections (e.g. HTTP 422): retrying every 5s is pure
+    // spam — the same body will fail the same way. Report once, back off quietly.
+    @Nullable private String deterministicNote = null;
+    private long deterministicUntilMs = 0;
+    private static final long DETERMINISTIC_COOLDOWN_MS = 5 * 60 * 1000L;
 
     @Nullable private Instant lastSuccess = null;
     @Nullable private String lastResult = null;
@@ -87,6 +92,8 @@ public class CMSyncManager {
         this.lastPushedCount = -1;
         this.failing = false;
         this.lastAttemptMs = 0;
+        this.deterministicNote = null;
+        this.deterministicUntilMs = 0;
         this.lastSuccess = null;
         this.lastResult = null;
     }
@@ -116,6 +123,8 @@ public class CMSyncManager {
 
         long now = System.currentTimeMillis();
         if (now - lastAttemptMs < Math.max(2, settings.intervalSeconds) * 1000L) return;
+        // deterministic rejection cooling down: stay quiet, don't burn the lane
+        if (now < deterministicUntilMs) return;
         // queue lane: if network busy, skip this tick (coalesce) — keeps FPS smooth
         if (!CMSyncQueue.tryClaim()) return;
         lastAttemptMs = now;
@@ -215,6 +224,15 @@ public class CMSyncManager {
         try {
             if (dirty && !emptyLocal) {
                 CMSyncHttp.PushOutcome push = CMSyncHttp.push(url, token, ident, prevHash, fullHash, changes).join();
+                // deterministic rejections would fail identically on every retry —
+                // handle separately (one message + cooldown) instead of the flap loop
+                if (push.result() == CMSyncHttp.Result.VALIDATION_ERROR
+                        || push.result() == CMSyncHttp.Result.NOT_A_CMSYNC_SERVER) {
+                    final String note = push.note().isEmpty() ? push.result().name() : push.note();
+                    client.execute(() -> handleDeterministic(client, bankId, note));
+                    doPullBlocking(client, bankId, url, token, playerUuid, serverId, playerName, serverName, mcVersion);
+                    return;
+                }
                 client.execute(() -> handlePushResult(client, bankId, push.result(),
                         push.result() == CMSyncHttp.Result.SYNCED ? fullHash : prevHash,
                         false, push.note(), changes.size()));
@@ -301,6 +319,24 @@ public class CMSyncManager {
         }
     }
 
+    /**
+     * Server deterministically rejects our push body (e.g. HTTP 422). Retrying the
+     * same bytes every 5s is spam — say it once with the server's reason, pause pushes
+     * for a few minutes, keep pulling. Clears on next successful push or reconnect.
+     */
+    private void handleDeterministic(Minecraft client, String bankId, String note) {
+        if (!bankId.equals(activeBankId)) return;
+        this.failing = false;
+        this.lastResult = "rejected: " + note;
+        if (!note.equals(deterministicNote)) {
+            this.deterministicNote = note;
+            sendChat(client, Component.literal("CMSync push rejected by server: " + note), ChatFormatting.RED);
+            sendChat(client, Component.literal("Push paused 5 min, pulls continue. "
+                    + "If this persists, check the server log or update the mod."), ChatFormatting.GRAY);
+        }
+        this.deterministicUntilMs = System.currentTimeMillis() + DETERMINISTIC_COOLDOWN_MS;
+    }
+
     private void handlePushResult(Minecraft client, String bankId, CMSyncHttp.Result r,
                                   @Nullable String hash, boolean skipped, String note, int pushedCount) {
         if (!bankId.equals(activeBankId)) return;
@@ -311,6 +347,8 @@ public class CMSyncManager {
                 lastSuccess = Instant.now();
                 lastResult = "synced";
             }
+            deterministicNote = null;
+            deterministicUntilMs = 0;
             if (failing) {
                 failing = false;
                 sendChat(client, Component.literal("CMSync re-established"), ChatFormatting.GREEN);

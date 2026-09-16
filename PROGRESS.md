@@ -19,6 +19,10 @@
 * ~~Compile jar~~ DONE 2026-09-16: `chesttracker-2.8.1+1.21.11+dev-662ea6a.jar` (3.5 MB, BUILD SUCCESSFUL,
   all 7 `impl/cmsync` classes verified inside) → GitHub prerelease `cmsync-1.21.11-1`
   + local copy in `releases/` (gitignored). Requires Fabric API + YACL on 1.21.11.
+* Prerelease 2 (`cmsync-1.21.11-2`, `releases/chesttracker-2.8.1+1.21.11+cmsync2.jar`):
+  live-test fixes — push rejections surface the server reason in chat with a 5-min quiet
+  cooldown (pulls continue, no more fail/re-established spam); bare `/cmsync` prints help;
+  GUI Connect handshakes before saving; server logs exact 422 field+body.
 * Native tab inside EditMemoryBankScreen (v1 uses standalone `/cmsync gui` screen instead — simpler, version-proof).
 * 26.1.2/26.2 branch builds (same overlay, see porting doc).
 * Live Portainer deploy (repo is on GitHub private; needs your 2 env vars + Deploy click).

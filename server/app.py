@@ -6,14 +6,31 @@ import time
 from contextlib import contextmanager
 
 from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi.exceptions import RequestValidationError
+from fastapi.requests import Request
 from fastapi.responses import JSONResponse
+
+import logging
 
 import config
 import db
 from models import Change, HandshakeRequest, PushRequest
 
 app = FastAPI(title="CMSync", version="2.0.0")
+_log = logging.getLogger("cmsync")
 _last_snapshot: dict[str, float] = {}
+
+
+@app.exception_handler(RequestValidationError)
+async def _log_validation_error(request: Request, exc: RequestValidationError):
+    """Log the exact failing field + body (default handler stays silent in logs).
+    This is how we diagnose client 422s from Portainer without guessing."""
+    try:
+        raw = (await request.body()).decode("utf-8", "replace")[:2000]
+    except Exception:
+        raw = "<unreadable>"
+    _log.warning("422 %s %s errors=%s body=%s", request.method, request.url.path, exc.errors(), raw)
+    return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
 @contextmanager
 def _con():

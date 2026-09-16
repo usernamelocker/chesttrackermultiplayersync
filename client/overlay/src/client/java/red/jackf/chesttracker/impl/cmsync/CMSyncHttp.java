@@ -30,7 +30,9 @@ public class CMSyncHttp {
             .build();
 
     public enum Result {
-        SYNCED, ACCESS_DENIED, QUARANTINED, URL_NOT_FOUND, NOT_A_CMSYNC_SERVER, CONNECTION_FAILED
+        SYNCED, ACCESS_DENIED, QUARANTINED, URL_NOT_FOUND, NOT_A_CMSYNC_SERVER, CONNECTION_FAILED,
+        /** Server rejected the body shape (HTTP 422). Deterministic: retrying won't help. */
+        VALIDATION_ERROR
     }
 
     public record Identity(String playerUuid, String playerName, String serverId, String serverName,
@@ -109,6 +111,19 @@ public class CMSyncHttp {
                         if (o.has("containers")) containers = o.get("containers").getAsInt();
                         if (o.has("status") && o.get("status").getAsString().equalsIgnoreCase("QUARANTINED"))
                             r = Result.QUARANTINED;
+                        // FastAPI validation errors: surface the exact field (loc + msg) so the
+                        // player (and server log) shows WHY instead of a generic failure.
+                        if (note.isEmpty() && o.has("detail") && o.get("detail").isJsonArray()
+                                && !o.getAsJsonArray("detail").isEmpty()) {
+                            try {
+                                JsonObject first = o.getAsJsonArray("detail").get(0).getAsJsonObject();
+                                String loc = first.has("loc") ? first.get("loc").toString() : "";
+                                String msg = first.has("msg") ? first.get("msg").getAsString() : "validation failed";
+                                note = ("HTTP " + resp.statusCode() + ": " + loc + " " + msg).trim();
+                                if (note.length() > 180) note = note.substring(0, 180);
+                            } catch (RuntimeException ignored) {
+                            }
+                        }
                     } catch (RuntimeException ignored) {
                     }
                     return new PushOutcome(r, note, containers);
@@ -153,6 +168,7 @@ public class CMSyncHttp {
         int code = resp.statusCode();
         if (code == 404 || code == 405 || code == 410 || code == 501) return Result.NOT_A_CMSYNC_SERVER;
         if (code == 401 || code == 403) return Result.ACCESS_DENIED;
+        if (code == 422) return Result.VALIDATION_ERROR;
         if (code < 200 || code >= 300) return Result.CONNECTION_FAILED;
         try {
             JsonElement el = JsonParser.parseString(resp.body());
