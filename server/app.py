@@ -32,6 +32,18 @@ async def _log_validation_error(request: Request, exc: RequestValidationError):
     _log.warning("422 %s %s errors=%s body=%s", request.method, request.url.path, exc.errors(), raw)
     return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
+
+@app.middleware("http")
+async def _log_post_sender(request: Request, call_next):
+    """Fingerprint POST senders (client library + body size). Tells apart the real
+    mod (Java-http-client, bodies present) from hand tests, bots, or anything on
+    the player's machine that strips POST bodies (which arrive empty)."""
+    if request.method == "POST":
+        _log.info("POST %s ua=%s len=%s", request.url.path,
+                  request.headers.get("user-agent", "?")[:80],
+                  request.headers.get("content-length", "?"))
+    return await call_next(request)
+
 @contextmanager
 def _con():
     con = db.connect(config.DB_PATH)
