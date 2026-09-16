@@ -345,7 +345,7 @@ public class CMSyncManager {
 
     private static String gameVersion(Minecraft client) {
         try {
-            return client.getGameVersion();
+            return net.minecraft.SharedConstants.getCurrentVersion().name();
         } catch (Throwable t) {
             return "unknown";
         }

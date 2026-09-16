@@ -45,8 +45,7 @@ public class CMSyncCommand {
 
     private static String gameVersion() {
         try {
-            Minecraft mc = Minecraft.getInstance();
-            return mc.getGameVersion();
+            return net.minecraft.SharedConstants.getCurrentVersion().name();
         } catch (Throwable t) {
             return "unknown";
         }

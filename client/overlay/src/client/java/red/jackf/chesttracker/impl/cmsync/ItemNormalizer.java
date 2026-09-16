@@ -50,7 +50,7 @@ public final class ItemNormalizer {
             try {
                 Identifier id = Identifier.parse(o.get("id").getAsString());
                 int count = o.has("count") ? Math.max(1, o.get("count").getAsInt()) : 1;
-                BuiltInRegistries.ITEM.getValue(id).ifPresent(item -> out.add(new ItemStack(item, count)));
+                BuiltInRegistries.ITEM.getOptional(id).ifPresent(item -> out.add(new ItemStack(item, count)));
             } catch (RuntimeException ignored) {
                 // unknown id from newer version: keep going, don't crash merge
             }
