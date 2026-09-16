@@ -2,9 +2,13 @@
 # Usage: .\apply-overlay.ps1 -ModDir "C:\path\to\QMSync" [-MinecraftVersion "1.21.11"]
 param(
     [Parameter(Mandatory=$true)][string]$ModDir,
-    [string]$OverlayDir = (Join-Path $PSScriptRoot "..\client\overlay\src\client\java\red\jackf\chesttracker\impl\cmsync")
+    [string]$OverlayDir = ""
 )
 $ErrorActionPreference = "Stop"
+if ([string]::IsNullOrEmpty($OverlayDir)) {
+    $scriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+    $OverlayDir = Join-Path $scriptDir "..\client\overlay\src\client\java\red\jackf\chesttracker\impl\cmsync"
+}
 $dest = Join-Path $ModDir "src\client\java\red\jackf\chesttracker\impl\cmsync"
 New-Item -ItemType Directory -Path $dest -Force | Out-Null
 Copy-Item (Join-Path $OverlayDir "*.java") -Destination $dest -Force

@@ -16,8 +16,9 @@
 
 ## Not yet (needs full QMSync checkout + MC Gradle)
 
-* Compile jar against QMSync 1.21.11 base (`scripts/apply-overlay.ps1` does copy+hook, then `gradlew.bat check build`).
-  Can't build jar in this meta-repo (no MC deps vendored on purpose).
+* ~~Compile jar~~ DONE 2026-09-16: `chesttracker-2.8.1+1.21.11+dev-662ea6a.jar` (3.5 MB, BUILD SUCCESSFUL,
+  all 7 `impl/cmsync` classes verified inside) → GitHub prerelease `cmsync-1.21.11-1`
+  + local copy in `releases/` (gitignored). Requires Fabric API + YACL on 1.21.11.
 * Native tab inside EditMemoryBankScreen (v1 uses standalone `/cmsync gui` screen instead — simpler, version-proof).
 * 26.1.2/26.2 branch builds (same overlay, see porting doc).
 * Live Portainer deploy (repo is on GitHub private; needs your 2 env vars + Deploy click).
