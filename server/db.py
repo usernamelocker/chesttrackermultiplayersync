@@ -133,11 +133,18 @@ def prune_tombstones(con: sqlite3.Connection, ttl_days: int = 30) -> int:
     return cur.rowcount
 
 def should_quarantine_mass_delete(existing: int, delete_count: int,
-                                  max_fraction: float = 0.20, max_count: int = 50) -> bool:
-    """Guard: propagate deletes, but not mass wipes. Empty server never quarantines."""
+                                  max_fraction: float = 0.20, max_count: int = 50,
+                                  min_bank: int = 10) -> bool:
+    """Guard: propagate deletes, but not mass wipes. Empty server never quarantines,
+    and tiny banks (< min_bank) are exempt from the fraction rule so a new player
+    breaking their only chests isn't flagged — the absolute count rule still applies."""
     if existing <= 0 or delete_count <= 0:
         return False
-    return delete_count >= max_count or (delete_count / max(1, existing)) >= max_fraction
+    if delete_count >= max_count:
+        return True
+    if existing < min_bank:
+        return False
+    return (delete_count / max(1, existing)) >= max_fraction
 
 def is_empty_hash_push(full_hash: str, changes: list) -> bool:
     # Client sends sha256("[]")-style empty marker when it has nothing; server double-checks.

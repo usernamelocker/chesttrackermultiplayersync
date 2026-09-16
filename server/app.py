@@ -46,6 +46,17 @@ def _deny(reason: str, status: int = 200):
 def health():
     return {"ok": True, "time": time.time(), "expectedServer": config.EXPECTED_SERVER_ID}
 
+
+@app.get("/", include_in_schema=False)
+def index():
+    return {"service": "cmsync", "health": "/health", "protocol": 2}
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    from fastapi.responses import Response
+    return Response(status_code=204)
+
 @app.post("/api/handshake")
 def handshake(req: HandshakeRequest, x_cmsync_token: str | None = Header(default=None, alias="X-CMSync-Token")):
     if req.protocolVersion != 2:
@@ -85,7 +96,8 @@ def push(req: PushRequest, x_cmsync_token: str | None = Header(default=None, ali
 
         # Mass-delete guard: quarantine, snapshot first, do not apply deletes.
         if db.should_quarantine_mass_delete(existing, deletes,
-                                            config.MAX_DELETE_FRACTION, config.MAX_DELETE_COUNT):
+                                            config.MAX_DELETE_FRACTION, config.MAX_DELETE_COUNT,
+                                            config.MIN_QUARANTINE_BANK):
             snap_id = db.take_snapshot(con, sid, config.SNAPSHOT_KEEP)
             return JSONResponse({"status": "QUARANTINED",
                                  "reason": f"mass delete: {deletes} deletes vs {existing} stored",

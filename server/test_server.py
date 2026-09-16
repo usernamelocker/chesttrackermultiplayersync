@@ -42,6 +42,9 @@ def test_mass_delete_guard():
     assert db.should_quarantine_mass_delete(100, 5) is False
     assert db.should_quarantine_mass_delete(0, 0) is False
     assert db.should_quarantine_mass_delete(10, 50) is True
+    assert db.should_quarantine_mass_delete(3, 3) is False  # tiny banks exempt from fraction rule
+    assert db.should_quarantine_mass_delete(9, 9) is False
+    assert db.should_quarantine_mass_delete(10, 3) is True  # 30% of a 10-bank quarantines
     print("guard ok")
 
 def test_snapshot_restore():

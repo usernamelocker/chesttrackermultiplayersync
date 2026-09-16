@@ -41,6 +41,11 @@ r = c.get("/health")
 assert r.status_code == 200 and r.json()["ok"], r.text
 print("health ok")
 
+r = c.get("/")
+assert r.status_code == 200 and r.json()["service"] == "cmsync", r.text
+assert c.get("/favicon.ico").status_code == 204
+print("index ok")
+
 assert c.post("/api/handshake", json=ident(ALICE)).json()["status"] == "SYNCED"
 assert c.post("/api/handshake", json=ident("99999999-9999-9999-9999-999999999999")).json()["status"] == "ACCESS_DENIED"
 assert c.post("/api/handshake", json=ident(ALICE, sid="multiplayer/other")).json()["status"] == "ACCESS_DENIED"
