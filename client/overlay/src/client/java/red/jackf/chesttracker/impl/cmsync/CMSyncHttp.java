@@ -60,8 +60,13 @@ public class CMSyncHttp {
     }
 
     public static URI parseBaseUrl(String raw) {
+        if (raw == null) return null;
+        String s = raw.strip();
+        // tolerance: players type "host:port" without scheme into the GUI box —
+        // assume http rather than dead-ending on "bad URL"
+        if (!s.contains("://")) s = "http://" + s;
         try {
-            URI uri = URI.create(raw.strip());
+            URI uri = URI.create(s);
             if (uri.getScheme() == null || !(uri.getScheme().equals("http") || uri.getScheme().equals("https")))
                 return null;
             if (uri.getHost() == null) return null;

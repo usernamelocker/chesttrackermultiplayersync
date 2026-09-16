@@ -13,6 +13,8 @@
 * URL + optional token are typed in chat. Token is the 2nd word (split on first space).
 * Stored locally only: `<minecraft>/config/chesttracker/cmsync_<bank>.json`
   (`url`, `token`, `boundServerId`). Never sent anywhere except as `X-CMSync-Token` header to YOUR server.
+* URL box tolerates a missing scheme: `host:7000` becomes `http://host:7000` automatically.
+* Chat command splits on whitespace, so passwords with spaces only work via the `/cmsync gui` box.
 * `SHARED_TOKEN` empty on server = no password needed, whitelist UUIDs alone gate access.
   Set `SHARED_TOKEN` on server + players include it in connect if you want password + whitelist.
 * `ADMIN_TOKEN` (defaults to shared) only for `/api/restore` — players never type this in-game.

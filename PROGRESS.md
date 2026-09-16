@@ -23,6 +23,9 @@
   live-test fixes — push rejections surface the server reason in chat with a 5-min quiet
   cooldown (pulls continue, no more fail/re-established spam); bare `/cmsync` prints help;
   GUI Connect handshakes before saving; server logs exact 422 field+body.
+* Prerelease 3 (`cmsync-1.21.11-3`, `releases/chesttracker-2.8.1+1.21.11+cmsync3.jar`):
+  URL tolerance — GUI box and `/cmsync connect` accept `host:port` without `http://`.
+  Server fingerprints POST senders (UA + body length) to trace empty-body 422s.
 * Native tab inside EditMemoryBankScreen (v1 uses standalone `/cmsync gui` screen instead — simpler, version-proof).
 * 26.1.2/26.2 branch builds (same overlay, see porting doc).
 * Live Portainer deploy (repo is on GitHub private; needs your 2 env vars + Deploy click).
