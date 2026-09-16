@@ -18,7 +18,7 @@ This file is the advanced companion.
 cd /opt/cmsync/server
 cp .env.example .env   # fill EXPECTED_SERVER_ID + WHITELIST_UUIDS
 docker compose up -d --build
-curl localhost:8000/health
+curl localhost:7000/health
 ```
 
 ## Backups in Docker

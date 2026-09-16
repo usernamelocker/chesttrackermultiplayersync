@@ -26,4 +26,4 @@
 
 1. `/cmsync status` → exact `serverId` → Portainer env `EXPECTED_SERVER_ID`
 2. Friend UUIDs → Portainer env `WHITELIST_UUIDS`
-3. `http://VPS-IP:8000/health` → `{"ok":true}`, then connect from game
+3. `http://VPS-IP:7000/health` → `{"ok":true}`, then connect from game

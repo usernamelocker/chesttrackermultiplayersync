@@ -22,11 +22,10 @@ You only fill in a small table of settings. Portainer pulls everything from GitH
      `SHARED_TOKEN` to a long random password (e.g. 24+ random letters/numbers).
      Everyone who knows it can sync — no UUID list needed.
    - Leave everything else alone — all the other settings already have safe defaults.
-   - While `EXPECTED_SERVER_ID` is `TEMP`, every game connection is denied on purpose —
-     nothing can sync yet, but `/health` still answers so you can prove the deploy works.
 4. Click **Deploy the stack**. Then Containers → click `cmsync` → **Logs**.
-   Wait until you see `Uvicorn running on ... port 8000`. That means it's alive.
-5. In your browser open `http://YOUR-VPS-IP:8000/health`
+   Wait until you see `Uvicorn running` (it says port 8000 inside the container — normal,
+   the outside port is 7000, see next step). That means it's alive.
+5. In your browser open `http://YOUR-VPS-IP:7000/health`
    (replace YOUR-VPS-IP with the VPS address from Portainer or your host).
    You should see `{"ok":true,...}`. Done — server is up.
 
@@ -40,12 +39,12 @@ You only fill in a small table of settings. Portainer pulls everything from GitH
      with `.` and `:` as `_`. The port counts, so keep everyone on the identical address.
 2. Back in Portainer → Stacks → `cmsync` → **Editor** tab → Environment variables →
    set `EXPECTED_SERVER_ID` to that exact value → **Update the stack** (Redeploy).
-3. In-game: `/cmsync gui` → paste `http://YOUR-VPS-IP:8000` → Connect →
+3. In-game: `/cmsync gui` → paste `http://YOUR-VPS-IP:7000` → Connect →
    `/cmsync status` should say `synced` within ~10 seconds.
 
 ## Domain (your "ig")
 
-* Skip it for testing — `http://IP:8000` works fine.
+* Skip it for testing — `http://IP:7000` works fine.
 * Later, if you want `https://cmsync.yourdomain.com`: point the domain at the VPS,
   then add a reverse-proxy rule (Nginx/Traefik) forwarding to `cmsync:8000`.
   Players then use the `https://` address instead. Ask me when you get there.
