@@ -26,6 +26,10 @@
 * Prerelease 3 (`cmsync-1.21.11-3`, `releases/chesttracker-2.8.1+1.21.11+cmsync3.jar`):
   URL tolerance — GUI box and `/cmsync connect` accept `host:port` without `http://`.
   Server fingerprints POST senders (UA + body length) to trace empty-body 422s.
+* Prerelease 4 (`cmsync-1.21.11-4`, `releases/chesttracker-2.8.1+1.21.11+cmsync4.jar`):
+  ROOT CAUSE of all 422s — forced HTTP/1.1. Java's default HTTP_2 sends an h2c upgrade
+  the server drops bodies on (every POST arrived empty; proven by raw-socket repro:
+  same bytes + `Upgrade: h2c` → identical 422, plain → 200 SYNCED). INSTALL THIS ONE.
 * Native tab inside EditMemoryBankScreen (v1 uses standalone `/cmsync gui` screen instead — simpler, version-proof).
 * 26.1.2/26.2 branch builds (same overlay, see porting doc).
 * Live Portainer deploy (repo is on GitHub private; needs your 2 env vars + Deploy click).

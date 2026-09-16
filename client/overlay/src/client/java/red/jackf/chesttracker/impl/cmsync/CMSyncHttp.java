@@ -27,6 +27,10 @@ public class CMSyncHttp {
     private static final HttpClient CLIENT = HttpClient.newBuilder()
             .connectTimeout(CONNECT_TIMEOUT)
             .followRedirects(HttpClient.Redirect.NORMAL)
+            // MUST stay HTTP/1.1: Java's default (HTTP_2) attempts a cleartext h2c upgrade
+            // ("Upgrade: h2c"), and plain HTTP/1.1 servers (uvicorn/h11) drop the request
+            // body on such requests — every POST then arrives EMPTY (server 422s).
+            .version(HttpClient.Version.HTTP_1_1)
             .build();
 
     public enum Result {

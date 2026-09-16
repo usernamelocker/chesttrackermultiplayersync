@@ -18,6 +18,11 @@ from models import Change, HandshakeRequest, PushRequest
 
 app = FastAPI(title="CMSync", version="2.0.0")
 _log = logging.getLogger("cmsync")
+# Explicit handler: uvicorn's default config leaves the root logger handler-less,
+# so INFO records would silently vanish (only WARNING+ reaches stderr).
+_log.addHandler(logging.StreamHandler())
+_log.setLevel(logging.INFO)
+_log.propagate = False
 _last_snapshot: dict[str, float] = {}
 
 
