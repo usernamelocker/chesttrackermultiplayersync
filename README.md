@@ -14,11 +14,17 @@ Shared ChestTracker state for a private group: **in-game shared search + website
 
 ```
 chesttrackermultiplayersync/
+  mod/                FULL buildable mod source (QMSync 1.21.11 + cmsync overlay, see mod/CMSYNC.md)
   protocol/           shared HTTP contract v2 + JSON schemas + item normalization rules
   server/             FastAPI + SQLite authoritative merge store + backups
-  client/overlay/     Java overlay (impl/cmsync/*) to apply onto QMSync 1.21.11 base
+  client/overlay/     the same overlay as in mod/ (kept as the patch source of truth)
   docs/               architecture / testing / backups / porting notes
 ```
+
+Friends who just play: download the jar from GitHub Releases — no build needed.
+Friends who build: `cd mod`, follow `mod/CMSYNC.md` (needs Java 21 + a GitHub
+`read:packages` token). Portainer only ever builds `server/`, so the mod folder
+doesn't slow deploys down.
 
 ## Quickstart
 
