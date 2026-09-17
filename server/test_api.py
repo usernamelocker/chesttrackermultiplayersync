@@ -60,7 +60,10 @@ iron = [{"id": "minecraft:iron_ingot", "count": 5}]
 diamond = [{"id": "minecraft:diamond", "count": 2}]
 body = dict(ident(ALICE), fullHash="h1", changes=[
     change("minecraft:overworld", "1,2,3", 10, iron),
-    change("minecraft:overworld", "4,5,6", 10, diamond, mc="26.2"),
+    dict(change("minecraft:overworld", "4,5,6", 10, diamond, mc="26.2"),
+         raw={"v": 2, "mc": "26.2",
+              "memory": {"items": [{"id": "minecraft:diamond", "count": 2, "nbt": "ENCH:data"}]},
+              "override": {"customName": "Vault", "manualMode": "REMEMBER"}}),
 ])
 r = c.post("/api/push", json=body).json()
 assert r["status"] == "SYNCED" and r["applied"] == 2, r
@@ -68,7 +71,10 @@ print("push ok")
 
 r = c.get("/api/pull", params={"serverId": SID, "playerUuid": BOB}).json()
 assert r["status"] == "SYNCED" and len(r["changes"]) == 2, r
-print("pull ok")
+vault = [x for x in r["changes"] if x["pos"] == "4,5,6"][0]
+assert vault["raw"]["override"]["customName"] == "Vault", vault
+assert vault["raw"]["memory"]["items"][0]["id"] == "minecraft:diamond", vault
+print("pull ok (raw blob round-trips untouched)")
 
 r = c.get(f"/api/view/{SID}").json()
 assert r["totals"] == {"minecraft:iron_ingot": 5, "minecraft:diamond": 2}, r

@@ -30,6 +30,11 @@
   ROOT CAUSE of all 422s — forced HTTP/1.1. Java's default HTTP_2 sends an h2c upgrade
   the server drops bodies on (every POST arrived empty; proven by raw-socket repro:
   same bytes + `Upgrade: h2c` → identical 422, plain → 200 SYNCED). INSTALL THIS ONE.
+* Prerelease 5 (`cmsync-1.21.11-5`, `releases/chesttracker-2.8.1+1.21.11+cmsync5.jar`):
+  FULL NBT SYNC — pushes carry the native Memory record (enchantments, item names,
+  shulker/nested contents, container block+name) plus user overrides, inside `raw`.
+  Same-MC-version peers restore everything; other versions get names+counts.
+  No VPS change needed (server already stores raw opaquely). INSTALL THIS ONE.
 * Native tab inside EditMemoryBankScreen (v1 uses standalone `/cmsync gui` screen instead — simpler, version-proof).
 * 26.1.2/26.2 branch builds (same overlay, see porting doc).
 * Live Portainer deploy (repo is on GitHub private; needs your 2 env vars + Deploy click).

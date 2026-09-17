@@ -85,7 +85,7 @@ public class CMSyncScreen extends Screen {
                 mc.player.getUUID().toString(),
                 mc.player.getName().getString(),
                 coord.id(), coord.userFriendlyName(),
-                gameVersion(), "cmsync.1");
+                gameVersion(), CMSyncManager.MOD_VERSION);
         status = "contacting server…";
         // handshake FIRST like /cmsync connect does — only save on SYNCED, so a typo'd
         // URL/token can never silently activate syncing

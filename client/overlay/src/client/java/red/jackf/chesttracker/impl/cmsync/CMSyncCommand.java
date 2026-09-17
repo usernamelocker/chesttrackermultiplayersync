@@ -87,7 +87,7 @@ public class CMSyncCommand {
                 source.getPlayer().getUUID().toString(),
                 source.getPlayer().getName().getString(),
                 coord.id(), coord.userFriendlyName(),
-                gameVersion(), "cmsync.1");
+                gameVersion(), CMSyncManager.MOD_VERSION);
         source.sendFeedback(Component.literal("Connecting CMSync → " + parsed).withStyle(ChatFormatting.GRAY));
         CMSyncHttp.handshake(parsed.toString(), finalToken, ident).whenComplete((r, t) ->
                 source.getClient().execute(() -> {

@@ -6,11 +6,14 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.ItemStack;
+import org.jetbrains.annotations.Nullable;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Cross-version helpers. Merge/search on {id,count}; raw components stay opaque.
@@ -72,5 +75,76 @@ public final class ItemNormalizer {
 
     public static String hashChanges(List<JsonObject> changes) {
         return sha256(GSON.toJson(changes));
+    }
+
+    /** Stacks -> normalized list, skipping air/empty/unmapped. */
+    public static List<JsonObject> toNormList(List<ItemStack> stacks) {
+        List<JsonObject> out = new ArrayList<>();
+        for (ItemStack s : stacks) {
+            JsonObject n = toNorm(s);
+            if (n != null) out.add(n);
+        }
+        return out;
+    }
+
+    /**
+     * Change-detection projection: identity + searchable content + user overrides.
+     * Deliberately EXCLUDES the version-specific raw NBT blob — including it would make
+     * cross-version peers perpetually "dirty" (same chest, different codec bytes).
+     */
+    public static JsonObject projection(String key, String pos, boolean deleted,
+                                        List<JsonObject> items, @Nullable String customName,
+                                        String manualMode) {
+        JsonObject o = new JsonObject();
+        o.addProperty("key", key);
+        o.addProperty("pos", pos);
+        o.addProperty("deleted", deleted);
+        o.add("items", GSON.toJsonTree(items));
+        o.addProperty("customName", customName);
+        o.addProperty("manualMode", manualMode);
+        return o;
+    }
+
+    public static String hashProjections(List<JsonObject> projections) {
+        return sha256(GSON.toJson(projections));
+    }
+
+    /** Ordered id+count equality (digests intentionally ignored — see projection). */
+    public static boolean normItemsEqual(List<JsonObject> a, List<JsonObject> b) {
+        if (a.size() != b.size()) return false;
+        for (int i = 0; i < a.size(); i++) {
+            JsonObject x = a.get(i);
+            JsonObject y = b.get(i);
+            if (!Objects.equals(optStr(x, "id"), optStr(y, "id"))) return false;
+            if (optInt(x, "count", 1) != optInt(y, "count", 1)) return false;
+        }
+        return true;
+    }
+
+    @Nullable
+    public static String optStr(JsonObject o, String key) {
+        try {
+            if (o.has(key) && !o.get(key).isJsonNull()) return o.get(key).getAsString();
+        } catch (RuntimeException ignored) {
+        }
+        return null;
+    }
+
+    public static int optInt(JsonObject o, String key, int fallback) {
+        try {
+            if (o.has(key) && !o.get(key).isJsonNull()) return o.get(key).getAsInt();
+        } catch (RuntimeException ignored) {
+        }
+        return fallback;
+    }
+
+    @Nullable
+    public static Instant parseInstant(@Nullable String s) {
+        if (s == null) return null;
+        try {
+            return Instant.parse(s);
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 }

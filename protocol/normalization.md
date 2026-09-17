@@ -13,6 +13,30 @@ Full-bank raw replace breaks across versions. So:
 {"id": "minecraft:iron_ingot", "count": 64, "componentsDigest": "abc123…"}
 ```
 
+## Fidelity layer (cmsync.2+): full NBT inside `raw`
+
+Normalized view alone loses enchantments, custom names, shulker contents. So each
+change additionally carries (all inside the server-opaque `raw` blob — no server change):
+
+```json
+"raw": {
+  "v": 2,
+  "mc": "1.21.11",
+  "memory": { "...Memory.CODEC JSON: items with full components, name, container..." },
+  "override": { "customName": "Vault", "manualMode": "REMEMBER" }
+}
+```
+
+* Sender encodes its native `Memory` record (same codec as its own save files) off-thread.
+* Receiver restores everything **iff `raw.mc` equals its own MC version**, else names+counts fallback.
+* Change-detection hashes cover identity + items + overrides but NEVER the raw blob
+  (same chest encodes to different bytes per MC version — hashing it would flap forever).
+* Merge: same-UUID identical echo skipped (protects live entity tracking); otherwise
+  last-observation-wins; entity references are always stripped on receive (shared view
+  is positional; tracking re-livens on next open); explicit-clear converges removals;
+  legacy (v1, no `raw.v`) peers exchange memory only, overrides untouched.
+* Entity-held containers (minecarts/boats) are not sent (session-local positions).
+
 ## Client duties (`ItemNormalizer.java` in overlay)
 
 1. On push: map each `ItemStack` → `{id: registry id, count, componentsDigest}` + keep `raw` chunk from `DATA_CODEC`.
