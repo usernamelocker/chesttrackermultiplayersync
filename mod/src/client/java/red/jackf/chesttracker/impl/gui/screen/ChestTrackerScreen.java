@@ -13,11 +13,14 @@ import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.*;
 import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import red.jackf.chesttracker.impl.ChestTracker;
+import red.jackf.chesttracker.impl.cmsync.CMSyncManager;
+import red.jackf.chesttracker.impl.memory.EnderChestKeys;
 import red.jackf.chesttracker.api.memory.counting.CountingPredicate;
 import red.jackf.chesttracker.api.providers.ProviderUtils;
 import red.jackf.chesttracker.impl.compat.Compatibility;
@@ -74,6 +77,17 @@ public class ChestTrackerScreen extends Screen {
     private VerticalScrollWidget scroll;
     private Identifier currentMemoryKey;
     private List<ItemStack> items = Collections.emptyList();
+    // ender chest profiles (one shared icon + per-player buttons in a second column)
+    @Nullable
+    private ItemButton echestButton = null;
+    private final List<Button> profileButtons = new ArrayList<>();
+    private final List<Profile> profiles = new ArrayList<>();
+    private boolean profilesExpanded = false;
+    private static final int PROFILE_COLUMN_WIDTH = 100;
+    private static final int PROFILE_COLUMN_GAP = 4;
+
+    private record Profile(Identifier key, @Nullable UUID uuid, String name) {
+    }
 
     public ChestTrackerScreen(@Nullable Screen parent) {
         super(TITLE);
@@ -230,9 +244,13 @@ public class ChestTrackerScreen extends Screen {
 
         // key buttons
         // fix bad order on first open of screen, kind of hacky
-        bank.getKeys().forEach(loc -> bank.getMetadata().getVisualSettings().getOrCreateIcon(loc));
+        // (ender chest profiles resolve their own icon; don't pollute saved icon order)
+        bank.getKeys().stream()
+                .filter(loc -> !EnderChestKeys.isProfileKey(loc))
+                .forEach(loc -> bank.getMetadata().getVisualSettings().getOrCreateIcon(loc));
 
         var todo = bank.getKeys().stream()
+                .filter(loc -> !EnderChestKeys.isProfileKey(loc))
                 .sorted(Misc.bringToFront(bank.getMetadata()
                         .getVisualSettings()
                         .getKeyOrder())).toList();
@@ -249,6 +267,8 @@ public class ChestTrackerScreen extends Screen {
                 // unhighlight old
                 if (buttons.containsKey(this.currentMemoryKey))
                     buttons.get(this.currentMemoryKey).setHighlighted(false);
+                if (this.echestButton != null) this.echestButton.setHighlighted(false);
+                refreshProfileLabels(null);
 
                 // set item list
                 this.currentMemoryKey = resloc;
@@ -266,7 +286,107 @@ public class ChestTrackerScreen extends Screen {
             if (currentMemoryKey.equals(resloc)) button.setHighlighted(true);
         }
 
+        // ender chest profiles: single shared icon + collapsible per-player column.
+        // Without this every synced player's ender chest would be indistinguishable.
+        this.profileButtons.clear();
+        this.profiles.clear();
+        this.echestButton = null;
+        var echestKeys = bank.getKeys().stream()
+                .filter(EnderChestKeys::isProfileKey)
+                .sorted(Comparator.comparing(Identifier::toString)).toList();
+        if (!echestKeys.isEmpty()) {
+            collectProfiles(bank);
+            int echestIndex = todo.size();
+            this.echestButton = this.addRenderableWidget(new ItemButton(
+                    Items.ENDER_CHEST.getDefaultInstance(),
+                    this.left - MEMORY_ICON_OFFSET,
+                    this.top + echestIndex * MEMORY_ICON_SPACING, b -> {
+                this.profilesExpanded = !this.profilesExpanded;
+                this.profileButtons.forEach(p -> p.visible = this.profilesExpanded);
+                if (this.profilesExpanded) selectOwnProfile(buttons);
+            }, ItemButton.Background.CUSTOM));
+            this.echestButton.setTooltip(Tooltip.create(
+                    Component.literal("Ender Chests (" + profiles.size() + " players)")));
+            int profileX = this.left - MEMORY_ICON_OFFSET - PROFILE_COLUMN_GAP - PROFILE_COLUMN_WIDTH;
+            for (int i = 0; i < profiles.size(); i++) {
+                Profile profile = profiles.get(i);
+                Button profileButton = Button.builder(Component.literal(profile.name()),
+                                b -> selectProfile(profile, buttons))
+                        .bounds(profileX,
+                                this.top + (echestIndex + 1 + i) * MEMORY_ICON_SPACING,
+                                PROFILE_COLUMN_WIDTH,
+                                ItemButton.SIZE)
+                        .tooltip(Tooltip.create(Component.literal(profile.key().toString())))
+                        .build();
+                profileButton.visible = this.profilesExpanded;
+                this.addRenderableWidget(profileButton);
+                this.profileButtons.add(profileButton);
+            }
+            this.profilesExpanded = EnderChestKeys.isProfileKey(this.currentMemoryKey);
+            this.profileButtons.forEach(p -> p.visible = this.profilesExpanded);
+            if (EnderChestKeys.isProfileKey(this.currentMemoryKey)) {
+                this.echestButton.setHighlighted(true);
+                refreshProfileLabels(this.currentMemoryKey);
+            }
+        }
+
         updateItems();
+    }
+
+    private void collectProfiles(MemoryBankImpl bank) {
+        var player = Minecraft.getInstance().player;
+        UUID ownUuid = player != null ? player.getUUID() : null;
+        List<Profile> others = new ArrayList<>();
+        Profile own = null;
+        Profile legacy = null;
+        for (Identifier key : bank.getKeys()) {
+            if (!EnderChestKeys.isProfileKey(key)) continue;
+            Optional<UUID> owner = EnderChestKeys.ownerUuid(key);
+            if (owner.isEmpty()) {
+                // pre-migration leftover or unknown shape: still viewable, never merged
+                legacy = new Profile(key, null, "Legacy");
+                continue;
+            }
+            String name = CMSyncManager.INSTANCE.ownerName(bank.getId(), owner.get());
+            if (name == null) name = "Player " + owner.get().toString().substring(0, 8);
+            Profile profile = new Profile(key, owner.get(), name);
+            if (owner.get().equals(ownUuid)) own = profile;
+            else others.add(profile);
+        }
+        others.sort(Comparator.comparing(Profile::name, String.CASE_INSENSITIVE_ORDER));
+        if (own != null) this.profiles.add(own);
+        this.profiles.addAll(others);
+        if (legacy != null) this.profiles.add(legacy);
+    }
+
+    private void selectProfile(Profile profile, Map<Identifier, ItemButton> buttons) {
+        if (buttons.containsKey(this.currentMemoryKey))
+            buttons.get(this.currentMemoryKey).setHighlighted(false);
+        this.currentMemoryKey = profile.key();
+        updateItems();
+        if (this.echestButton != null) this.echestButton.setHighlighted(true);
+        refreshProfileLabels(profile.key());
+    }
+
+    private void selectOwnProfile(Map<Identifier, ItemButton> buttons) {
+        var player = Minecraft.getInstance().player;
+        UUID ownUuid = player != null ? player.getUUID() : null;
+        for (Profile profile : this.profiles) {
+            if (ownUuid != null && ownUuid.equals(profile.uuid())) {
+                selectProfile(profile, buttons);
+                return;
+            }
+        }
+        if (!this.profiles.isEmpty()) selectProfile(this.profiles.get(0), buttons);
+    }
+
+    private void refreshProfileLabels(@Nullable Identifier selected) {
+        for (int i = 0; i < this.profiles.size() && i < this.profileButtons.size(); i++) {
+            Profile profile = this.profiles.get(i);
+            String label = profile.name();
+            if (profile.key().equals(selected)) label = "▶ " + label;
+            this.profileButtons.get(i).setMessage(Component.literal(label));
+        }
     }
 
     private void cycleItemSort(ChangeableImageButton button) {

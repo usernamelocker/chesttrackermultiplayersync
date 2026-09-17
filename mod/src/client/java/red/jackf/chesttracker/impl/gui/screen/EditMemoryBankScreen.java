@@ -12,10 +12,16 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.Style;
+import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
+import net.minecraft.SharedConstants;
 import red.jackf.chesttracker.api.memory.counting.StackMergeMode;
 import red.jackf.chesttracker.api.providers.ProviderUtils;
+import red.jackf.chesttracker.impl.cmsync.CMSyncHttp;
+import red.jackf.chesttracker.impl.cmsync.CMSyncManager;
+import red.jackf.chesttracker.impl.cmsync.CMSyncSettings;
 import red.jackf.chesttracker.impl.config.ChestTrackerConfig;
 import red.jackf.chesttracker.impl.gui.GuiConstants;
 import red.jackf.chesttracker.impl.gui.util.TextColours;
@@ -82,6 +88,14 @@ public class EditMemoryBankScreen extends BaseUtilScreen {
     private StringWidget qmsyncStateLabel = null;
     @Nullable
     private CycleButton<Boolean> qmsyncPauseToggle = null;
+    @Nullable
+    private EditBox cmsyncUrlBox = null;
+    @Nullable
+    private EditBox cmsyncTokenBox = null;
+    @Nullable
+    private Button cmsyncConnectButton = null;
+    @Nullable
+    private StringWidget cmsyncStateLabel = null;
 
     private static int manageWorkingRange = 256;
 
@@ -266,6 +280,7 @@ public class EditMemoryBankScreen extends BaseUtilScreen {
             selectorOptions.put(SettingsTab.MANAGE, translatable("chesttracker.gui.editMemoryBank.manage"));
         selectorOptions.put(SettingsTab.SEARCH, translatable("chesttracker.gui.editMemoryBank.search"));
         selectorOptions.put(SettingsTab.QMSYNC, translatable("chesttracker.gui.editMemoryBank.qmsync"));
+        selectorOptions.put(SettingsTab.CMSYNC, translatable("chesttracker.gui.editMemoryBank.cmsync"));
         selectorOptions.put(SettingsTab.EMPTY, CommonComponents.EMPTY);
 
         settingsTabSelector.setOptions(selectorOptions);
@@ -276,6 +291,7 @@ public class EditMemoryBankScreen extends BaseUtilScreen {
         if (isCurrentLoaded) setupManagementSettings();
         setupSearchSettings();
         setupQMSyncSettings();
+        setupCMSyncSettings();
 
         addSetting(new StringWidget(getSettingsX(0),
                                     getSettingsY(0),
@@ -876,6 +892,164 @@ public class EditMemoryBankScreen extends BaseUtilScreen {
         refreshQMSyncStateLabel();
     }
 
+    ////////////
+    // CMSYNC //
+    ////////////
+    // Team sync lives here. The older QMSync tab above is the website-upload system;
+    // this tab is the shared team database. They are independent — either, both, or
+    // neither can be active.
+
+    private void setupCMSyncSettings() {
+        var font = Minecraft.getInstance().font;
+        CMSyncSettings settings = CMSyncSettings.load(this.memoryBank.id());
+        boolean canConnect = isCurrentLoaded && Minecraft.getInstance().level != null;
+
+        // row 0: what this is
+        addSetting(new StringWidget(getSettingsX(0),
+                                    getSettingsY(0),
+                                    getSettingsWidth(2),
+                                    BUTTON_HEIGHT,
+                                    translatable("chesttracker.gui.editMemoryBank.cmsync.desc"),
+                                    font), SettingsTab.CMSYNC);
+
+        // row 1: URL entry
+        this.cmsyncUrlBox = new CustomEditBox(font,
+                                              getSettingsX(0),
+                                              getSettingsY(1),
+                                              getSettingsWidth(2),
+                                              BUTTON_HEIGHT,
+                                              null,
+                                              CommonComponents.EMPTY);
+        this.cmsyncUrlBox.setMaxLength(256);
+        this.cmsyncUrlBox.setHint(translatable("chesttracker.gui.editMemoryBank.cmsync.urlHint"));
+        this.cmsyncUrlBox.setValue(Optional.ofNullable(settings.url).orElse(""));
+        addSetting(this.cmsyncUrlBox, SettingsTab.CMSYNC);
+
+        // row 2: token entry (masked on screen, stored on this PC only)
+        this.cmsyncTokenBox = new CustomEditBox(font,
+                                                getSettingsX(0),
+                                                getSettingsY(2),
+                                                getSettingsWidth(2),
+                                                BUTTON_HEIGHT,
+                                                null,
+                                                CommonComponents.EMPTY);
+        this.cmsyncTokenBox.setMaxLength(256);
+        this.cmsyncTokenBox.setHint(translatable("chesttracker.gui.editMemoryBank.cmsync.tokenHint"));
+        this.cmsyncTokenBox.setValue(Optional.ofNullable(settings.token).orElse(""));
+        this.cmsyncTokenBox.addFormatter(
+                (text, cursor) -> FormattedCharSequence.forward("*".repeat(text.length()), Style.EMPTY));
+        addSetting(this.cmsyncTokenBox, SettingsTab.CMSYNC);
+
+        // row 3: connect + state
+        var connectButton = Button.builder(translatable("chesttracker.gui.editMemoryBank.cmsync.connect"), b -> cmsyncConnect())
+                                  .tooltip(Tooltip.create(translatable("chesttracker.gui.editMemoryBank.qmsync.connect.tooltip")))
+                                  .bounds(getSettingsX(0), getSettingsY(3), getSettingsWidth(1), BUTTON_HEIGHT)
+                                  .build();
+        connectButton.active = canConnect;
+        this.cmsyncConnectButton = connectButton;
+        addSetting(connectButton, SettingsTab.CMSYNC);
+
+        this.cmsyncStateLabel = new StringWidget(getSettingsX(1),
+                                                 getSettingsY(3),
+                                                 getSettingsWidth(1),
+                                                 BUTTON_HEIGHT,
+                                                 cmsyncStateText(settings),
+                                                 font);
+        addSetting(this.cmsyncStateLabel, SettingsTab.CMSYNC);
+
+        // row 4: stop (full width)
+        var stopButton = Button.builder(translatable("chesttracker.gui.editMemoryBank.cmsync.stop"), this::cmsyncStop)
+                               .bounds(getSettingsX(0), getSettingsY(4), getSettingsWidth(2), BUTTON_HEIGHT)
+                               .build();
+        addSetting(stopButton, SettingsTab.CMSYNC);
+    }
+
+    private Component cmsyncStateText(CMSyncSettings settings) {
+        if (settings.isActive())
+            return translatable("chesttracker.gui.editMemoryBank.cmsync.state.active").withStyle(ChatFormatting.GREEN);
+        if (settings.isConnected())
+            return translatable("chesttracker.gui.editMemoryBank.cmsync.state.paused").withStyle(ChatFormatting.YELLOW);
+        return translatable("chesttracker.gui.editMemoryBank.cmsync.state.notConnected").withStyle(ChatFormatting.GRAY);
+    }
+
+    private void refreshCMSyncStateLabel() {
+        if (this.cmsyncStateLabel != null)
+            this.cmsyncStateLabel.setMessage(cmsyncStateText(CMSyncSettings.load(this.memoryBank.id())));
+    }
+
+    private void cmsyncConnect() {
+        if (this.cmsyncUrlBox == null || this.cmsyncStateLabel == null) return;
+        var coordinate = Coordinate.getCurrent();
+        var player = Minecraft.getInstance().player;
+        if (coordinate.isEmpty() || player == null || !isCurrentLoaded) return;
+
+        var parsed = CMSyncHttp.parseBaseUrl(this.cmsyncUrlBox.getValue());
+        if (parsed == null) {
+            this.cmsyncStateLabel.setMessage(translatable("chesttracker.gui.editMemoryBank.cmsync.state.invalidUrl")
+                                                     .withStyle(ChatFormatting.RED));
+            return;
+        }
+
+        if (this.cmsyncConnectButton != null) this.cmsyncConnectButton.active = false;
+        this.cmsyncStateLabel.setMessage(translatable("chesttracker.gui.editMemoryBank.cmsync.state.connecting")
+                                                 .withStyle(ChatFormatting.GRAY));
+
+        final String bankId = this.memoryBank.id();
+        String token = this.cmsyncTokenBox != null ? this.cmsyncTokenBox.getValue().strip() : "";
+        final String tokenOrNull = token.isEmpty() ? null : token;
+        var identity = new CMSyncHttp.Identity(player.getUUID().toString(),
+                                               player.getName().getString(),
+                                               coordinate.get().id(),
+                                               coordinate.get().userFriendlyName(),
+                                               gameVersion(),
+                                               CMSyncManager.MOD_VERSION);
+
+        CMSyncHttp.handshake(parsed.toString(), tokenOrNull, identity).whenComplete((result, throwable) ->
+                Minecraft.getInstance().execute(() -> {
+                    if (this.cmsyncConnectButton != null) this.cmsyncConnectButton.active = true;
+                    var outcome = throwable != null ? CMSyncHttp.Result.CONNECTION_FAILED : result;
+
+                    if (outcome == CMSyncHttp.Result.SYNCED) {
+                        CMSyncSettings viewSettings = CMSyncSettings.load(bankId);
+                        viewSettings.url = parsed.toString();
+                        viewSettings.token = tokenOrNull;
+                        viewSettings.enabled = true;
+                        viewSettings.paused = false;
+                        viewSettings.boundServerId = coordinate.get().id();
+                        viewSettings.save(bankId);
+                        MemoryBankAccessImpl.INSTANCE.getLoadedInternal().ifPresent(bank -> {
+                            if (!bank.getId().equals(bankId)) return;
+                            CMSyncManager.INSTANCE.markActivated(bankId, coordinate.get().id());
+                            MemoryBankAccessImpl.INSTANCE.save();
+                        });
+                        refreshCMSyncStateLabel();
+                    } else if (this.cmsyncStateLabel != null) {
+                        this.cmsyncStateLabel.setMessage((switch (outcome) {
+                            case ACCESS_DENIED -> translatable("chesttracker.qmsync.accessDenied");
+                            default -> translatable("chesttracker.gui.editMemoryBank.cmsync.state.failed");
+                        }).withStyle(ChatFormatting.RED));
+                    }
+                }));
+    }
+
+    private void cmsyncStop(Button button) {
+        CMSyncSettings settings = CMSyncSettings.load(this.memoryBank.id());
+        settings.forget();
+        settings.save(this.memoryBank.id());
+        CMSyncManager.INSTANCE.deactivate();
+        if (this.cmsyncUrlBox != null) this.cmsyncUrlBox.setValue("");
+        if (this.cmsyncTokenBox != null) this.cmsyncTokenBox.setValue("");
+        refreshCMSyncStateLabel();
+    }
+
+    private static String gameVersion() {
+        try {
+            return SharedConstants.getCurrentVersion().name();
+        } catch (Throwable t) {
+            return "unknown";
+        }
+    }
+
     ///////////
     // UTILS //
     ///////////
@@ -998,6 +1172,7 @@ public class EditMemoryBankScreen extends BaseUtilScreen {
         MANAGE,
         SEARCH,
         QMSYNC,
+        CMSYNC,
         EMPTY
     }
 }

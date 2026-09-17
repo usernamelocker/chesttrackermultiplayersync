@@ -9,13 +9,13 @@ import red.jackf.chesttracker.api.ChestTrackerPlugin;
 import red.jackf.chesttracker.api.EventPhases;
 import red.jackf.chesttracker.api.gui.GetCustomName;
 import red.jackf.chesttracker.api.gui.ScreenBlacklist;
-import red.jackf.chesttracker.api.memory.CommonKeys;
 import red.jackf.chesttracker.api.providers.*;
 import red.jackf.chesttracker.api.providers.context.ScreenCloseContext;
 import red.jackf.chesttracker.api.providers.defaults.*;
 import red.jackf.chesttracker.impl.compat.mods.ShareEnderChestIntegration;
 import red.jackf.chesttracker.impl.compat.servers.hypixel.HypixelProvider;
 import red.jackf.chesttracker.impl.gui.util.CTTitleOverrideDuck;
+import red.jackf.chesttracker.impl.memory.EnderChestKeys;
 import red.jackf.jackfredlib.api.base.ResultHolder;
 import red.jackf.whereisit.api.search.ConnectedBlocksGrabber;
 
@@ -64,7 +64,7 @@ public class DefaultChestTrackerPlugin implements ChestTrackerPlugin {
 
         DefaultProviderScreenOpen.EVENT.register((provider, context) -> {
             if (fromEnderChestCommand.get()) {
-                context.setMemoryLocation(MemoryLocation.override(CommonKeys.ENDER_CHEST_KEY, BlockPos.ZERO));
+                context.setMemoryLocation(MemoryLocation.override(EnderChestKeys.ownKey(), BlockPos.ZERO));
                 return true;
             } else {
                 return false;
@@ -89,7 +89,7 @@ public class DefaultChestTrackerPlugin implements ChestTrackerPlugin {
 
         DefaultProviderMemoryLocation.EVENT.register(EventPhases.DEFAULT_PHASE, cbs -> {
             if (cbs.blockState().getBlock() == Blocks.ENDER_CHEST || fromEnderChestCommand.get()) {
-                return ResultHolder.value(MemoryLocation.override(CommonKeys.ENDER_CHEST_KEY, BlockPos.ZERO));
+                return ResultHolder.value(MemoryLocation.override(EnderChestKeys.ownKey(), BlockPos.ZERO));
             }
 
             return ResultHolder.pass();
@@ -137,6 +137,6 @@ public class DefaultChestTrackerPlugin implements ChestTrackerPlugin {
 
         return ResultHolder.value(MemoryBuilder.create(context.getItemsWithEmpty())
                 .inContainer(Blocks.ENDER_CHEST)
-                .toResult(CommonKeys.ENDER_CHEST_KEY, BlockPos.ZERO));
+                .toResult(EnderChestKeys.ownKey(), BlockPos.ZERO));
     }
 }

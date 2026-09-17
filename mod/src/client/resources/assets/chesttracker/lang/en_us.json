@@ -50,7 +50,7 @@
   "chesttracker.qmsync.notifications.errorsOnly": "Errors only",
   "chesttracker.qmsync.notifications.silent": "Silent",
 
-  "chesttracker.gui.editMemoryBank.qmsync": "QMSync",
+  "chesttracker.gui.editMemoryBank.qmsync": "QMSync (Website)",
   "chesttracker.gui.editMemoryBank.qmsync.urlHint": "https://example.com",
   "chesttracker.gui.editMemoryBank.qmsync.connect": "Connect",
   "chesttracker.gui.editMemoryBank.qmsync.connect.tooltip": "Perform the QMSync handshake with the entered website for the current world or server.",
@@ -73,6 +73,19 @@
   "chesttracker.gui.editMemoryBank.qmsync.enderChest.tooltip": "Include your ender chest contents in uploads. Turn off to keep them private.",
   "chesttracker.gui.editMemoryBank.qmsync.names": "Sync Names",
   "chesttracker.gui.editMemoryBank.qmsync.names.tooltip": "Include custom container names in uploads. Turn off to upload item data only.",
+
+  "chesttracker.gui.editMemoryBank.cmsync": "CMSync (Team)",
+  "chesttracker.gui.editMemoryBank.cmsync.desc": "Team sync: shares this server's containers between your group's synced games.",
+  "chesttracker.gui.editMemoryBank.cmsync.urlHint": "https://your-server:7000",
+  "chesttracker.gui.editMemoryBank.cmsync.tokenHint": "Shared password (stored on this PC only)",
+  "chesttracker.gui.editMemoryBank.cmsync.connect": "Connect",
+  "chesttracker.gui.editMemoryBank.cmsync.stop": "Stop",
+  "chesttracker.gui.editMemoryBank.cmsync.state.active": "Active",
+  "chesttracker.gui.editMemoryBank.cmsync.state.paused": "Paused",
+  "chesttracker.gui.editMemoryBank.cmsync.state.notConnected": "Not connected",
+  "chesttracker.gui.editMemoryBank.cmsync.state.connecting": "Connecting...",
+  "chesttracker.gui.editMemoryBank.cmsync.state.invalidUrl": "Invalid URL",
+  "chesttracker.gui.editMemoryBank.cmsync.state.failed": "Connection failed",
 
   "chesttracker.generic.seconds": "%d seconds",
   "chesttracker.generic.minutes": "%d minutes",

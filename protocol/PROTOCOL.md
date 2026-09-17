@@ -58,7 +58,8 @@ Client stores base URL per bank on `SYNCED` only.
       "updatedBy": "uuid",
       "mcVersion": "1.21.11",
       "items": [{"id": "minecraft:iron_ingot", "count": 64, "componentsDigest": "…"}],
-      "raw": {"items": [...vanilla codec output...], "name": {...}, "overrides": {...}}
+      "raw": {"v": 2, "mc": "1.21.11", "memory": {"items": [...full NBT...], "name": {...}},
+              "override": {"customName": "...", "manualMode": "..."}}
     }
   ]
 }
@@ -73,7 +74,7 @@ Client stores base URL per bank on `SYNCED` only.
 * **Empty-bank rule:** if `changes` is empty AND `fullHash` == hash(empty) while server has >0 containers,
   server ignores (protects hub-wipe). Client must also skip push in that case.
 
-### `GET <base>/api/pull?serverId=…&since=…`
+### `GET <base>/api/pull?serverId=…&since=…&px=…&py=…&pz=…&dim=…`
 
 Returns changes since opaque cursor:
 
@@ -83,9 +84,18 @@ Returns changes since opaque cursor:
   "serverTime": "2026-09-15T18:01:00Z",
   "cursor": "12345",
   "changes": [ "...same shape as push..." ],
-  "tombstones": [{"key": "...", "pos": "...", "deletedAt": "..."}]
+  "tombstones": [{"key": "...", "pos": "...", "deletedAt": "..."}],
+  "owners": {"<uuid>": "<playerName>"}
 }
 ```
+
+* **Range gate:** with player position (`px,py,pz` + dimension `dim`), only same-dimension
+  containers within `RANGE_BLOCKS` (default 5000) are returned — plus ender-style keys,
+  which have no position and always pass. Tombstones are gated the same way (positions
+  leak too). Without position params the pull is ungated (old-client compatible).
+* `owners` maps ender-chest key owners to last-seen names (powers profile labels).
+* Ender chests sync under per-player keys (`chesttracker:ender_chest/<uuid>` etc.),
+  so teammates' ender chests never merge — the server treats keys opaquely.
 
 Client merges into loaded `MemoryBankImpl` on client thread (see overlay `CMSyncManager`).
 
@@ -100,7 +110,7 @@ Client merges into loaded `MemoryBankImpl` on client thread (see overlay `CMSync
 
 ## Status strings
 
-`SYNCED | ACCESS_DENIED | QUARANTINED | URL_NOT_FOUND | NOT_A_CMSYNC_SERVER | CONNECTION_FAILED`
+`SYNCED | ACCESS_DENIED | QUARANTINED | URL_NOT_FOUND | NOT_A_CMSYNC_SERVER | CONNECTION_FAILED | VALIDATION_ERROR`
 Same chat semantics as QMSync: report failure once per outage, recovery once.
 
 ## Compatibility

@@ -40,4 +40,7 @@ SNAPSHOT_KEEP = int(os.environ.get("SNAPSHOT_KEEP", "96"))
 MAX_DELETE_FRACTION = float(os.environ.get("MAX_DELETE_FRACTION", "0.20"))
 MAX_DELETE_COUNT = int(os.environ.get("MAX_DELETE_COUNT", "50"))
 MIN_QUARANTINE_BANK = int(os.environ.get("MIN_QUARANTINE_BANK", "10"))
+# Range gate: pull only returns same-dimension containers within this many blocks
+# of the requesting player (+ ender-style keys, which have no position).
+RANGE_BLOCKS = int(os.environ.get("RANGE_BLOCKS", "5000"))
 TOMBSTONE_TTL_DAYS = int(os.environ.get("TOMBSTONE_TTL_DAYS", "30"))

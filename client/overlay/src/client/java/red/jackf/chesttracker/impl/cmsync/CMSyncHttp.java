@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import org.jetbrains.annotations.Nullable;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -11,7 +12,9 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -57,7 +60,8 @@ public class CMSyncHttp {
     public record PushOutcome(Result result, String note, int containers) {
     }
 
-    public record PullOutcome(Result result, List<JsonObject> changes, List<JsonObject> tombstones, int containers) {
+    public record PullOutcome(Result result, List<JsonObject> changes, List<JsonObject> tombstones,
+                                int containers, Map<String, String> owners) {
     }
 
     private CMSyncHttp() {
@@ -140,16 +144,24 @@ public class CMSyncHttp {
                 .exceptionally(t -> new PushOutcome(classifyError(t), t.getMessage(), -1));
     }
 
-    public static CompletableFuture<PullOutcome> pull(String baseUrl, String token, String serverId, String playerUuid) {
+    public static CompletableFuture<PullOutcome> pull(String baseUrl, String token, String serverId, String playerUuid,
+                                                      @Nullable Integer px, @Nullable Integer py, @Nullable Integer pz,
+                                                      @Nullable String dim) {
         String b = baseUrl.strip();
         if (b.endsWith("/")) b = b.substring(0, b.length() - 1);
-        String url = b + "/api/pull?serverId=" + uri(serverId) + "&playerUuid=" + uri(playerUuid);
-        HttpRequest.Builder rb = HttpRequest.newBuilder(URI.create(url)).timeout(REQUEST_TIMEOUT).GET();
+        StringBuilder url = new StringBuilder(b + "/api/pull?serverId=" + uri(serverId)
+                + "&playerUuid=" + uri(playerUuid));
+        // player position lets the server withhold far-away containers (range gate);
+        // omitted for old servers, which simply return everything as before
+        if (px != null && py != null && pz != null && dim != null)
+            url.append("&px=").append(px).append("&py=").append(py).append("&pz=").append(pz)
+                    .append("&dim=").append(uri(dim));
+        HttpRequest.Builder rb = HttpRequest.newBuilder(URI.create(url.toString())).timeout(REQUEST_TIMEOUT).GET();
         if (token != null && !token.isBlank()) rb.header("X-CMSync-Token", token.strip());
         return CLIENT.sendAsync(rb.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
                 .thenApply(resp -> {
                     Result r = classify(resp);
-                    if (r != Result.SYNCED) return new PullOutcome(r, List.of(), List.of(), -1);
+                    if (r != Result.SYNCED) return new PullOutcome(r, List.of(), List.of(), -1, Map.of());
                     try {
                         JsonObject o = JsonParser.parseString(resp.body()).getAsJsonObject();
                         List<JsonObject> ch = new java.util.ArrayList<>();
@@ -157,12 +169,21 @@ public class CMSyncHttp {
                         if (o.has("changes")) o.getAsJsonArray("changes").forEach(e -> ch.add(e.getAsJsonObject()));
                         if (o.has("tombstones")) o.getAsJsonArray("tombstones").forEach(e -> tb.add(e.getAsJsonObject()));
                         int c = o.has("containers") ? o.get("containers").getAsInt() : -1;
-                        return new PullOutcome(Result.SYNCED, ch, tb, c);
+                        Map<String, String> owners = new HashMap<>();
+                        if (o.has("owners") && o.get("owners").isJsonObject()) {
+                            for (var e : o.getAsJsonObject("owners").entrySet()) {
+                                try {
+                                    if (!e.getValue().isJsonNull()) owners.put(e.getKey(), e.getValue().getAsString());
+                                } catch (RuntimeException ignored) {
+                                }
+                            }
+                        }
+                        return new PullOutcome(Result.SYNCED, ch, tb, c, owners);
                     } catch (RuntimeException e) {
-                        return new PullOutcome(Result.NOT_A_CMSYNC_SERVER, List.of(), List.of(), -1);
+                        return new PullOutcome(Result.NOT_A_CMSYNC_SERVER, List.of(), List.of(), -1, Map.of());
                     }
                 })
-                .exceptionally(t -> new PullOutcome(classifyError(t), List.of(), List.of(), -1));
+                .exceptionally(t -> new PullOutcome(classifyError(t), List.of(), List.of(), -1, Map.of()));
     }
 
     private static String uri(String s) {

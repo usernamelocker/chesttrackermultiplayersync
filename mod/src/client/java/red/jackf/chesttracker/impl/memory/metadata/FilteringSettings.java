@@ -37,9 +37,9 @@ public class FilteringSettings {
         ));
     });
 
-    // opt-in by default: a container is only ever recorded once the player marks it via the inventory button,
-    // so nothing the player hasn't deliberately added can reach a QMSync website
-    public boolean manualMode = true;
+    // auto-record by default: every opened container is remembered (and, with CMSync
+    // team sync on, shared). Turn on Manual Mode to go back to opt-in per container.
+    public boolean manualMode = false;
     public boolean onlyRememberNamed = false;
     public RememberedContainers rememberedContainers = RememberedContainers.ALL;
     public boolean rememberEnderChests = true;

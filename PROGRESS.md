@@ -35,6 +35,11 @@
   shulker/nested contents, container block+name) plus user overrides, inside `raw`.
   Same-MC-version peers restore everything; other versions get names+counts.
   No VPS change needed (server already stores raw opaquely). INSTALL THIS ONE.
+* Prerelease 6 (`cmsync-1.21.11-6`): Manual Mode OFF by default (auto-record);
+  CMSync tab in Memory Bank menu (URL + masked token + connect + stop), QMSync tab
+  relabeled Website; per-player ender chests (one icon + per-player profiles, own
+  migration); server 5k range gate on pulls (+tombstones) with ender exemption;
+  player-name owners for profiles. INSTALL THIS ONE (needs VPS redeploy too).
 * Native tab inside EditMemoryBankScreen (v1 uses standalone `/cmsync gui` screen instead — simpler, version-proof).
 * 26.1.2/26.2 branch builds (same overlay, see porting doc).
 * Live Portainer deploy (repo is on GitHub private; needs your 2 env vars + Deploy click).

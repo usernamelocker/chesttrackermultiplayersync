@@ -39,7 +39,8 @@ You only fill in a small table of settings. Portainer pulls everything from GitH
      with `.` and `:` as `_`. The port counts, so keep everyone on the identical address.
 2. Back in Portainer → Stacks → `cmsync` → **Editor** tab → Environment variables →
    set `EXPECTED_SERVER_ID` to that exact value → **Update the stack** (Redeploy).
-3. In-game: `/cmsync gui` → paste `http://YOUR-VPS-IP:7000` → Connect →
+3. In-game: Memory Bank menu (`` ` `` key → pencil icon) → **CMSync (Team)** tab →
+   paste `http://YOUR-VPS-IP:7000` + token → Connect →
    `/cmsync status` should say `synced` within ~10 seconds.
 
 ## Domain (your "ig")

@@ -153,4 +153,35 @@ r = c.get("/api/pull", params={"serverId": ALIAS, "playerUuid": STRANGER}, heade
 assert r["status"] == "SYNCED" and any(x["pos"] == "7,7,7" for x in r["changes"]), r
 print("alias mode ok")
 
+# --- range gate: near kept, far + other-dim withheld, ender exempt, legacy full ---
+EUUID = "33333333-3333-3333-3333-333333333333"
+
+
+def rchange(key, pos, hour):
+    return {"key": key, "pos": pos, "deleted": False, "updatedAt": f"2026-09-15T{hour:02d}:00:00Z",
+            "updatedBy": EUUID, "mcVersion": "1.21.11", "items": [{"id": "minecraft:stone", "count": 1}]}
+
+
+r = c.post("/api/push", json=dict(fident(STRANGER, CANON), fullHash="r1", changes=[
+    rchange("minecraft:overworld", "100,64,100", 15),
+    rchange("minecraft:overworld", "9000,64,9000", 15),
+    rchange("minecraft:the_nether", "100,64,100", 15),
+    rchange(f"chesttracker:ender_chest/{EUUID}", "0,0,0", 15),
+]), headers=TOK).json()
+assert r["status"] == "SYNCED" and r["applied"] == 4, r
+r = c.get("/api/pull", params={"serverId": CANON, "playerUuid": STRANGER,
+                               "px": 0, "py": 64, "pz": 0, "dim": "minecraft:overworld"}, headers=TOK).json()
+assert r["status"] == "SYNCED", r
+got = {(x["key"], x["pos"]) for x in r["changes"]}
+assert ("minecraft:overworld", "100,64,100") in got, got
+assert not any(p == "9000,64,9000" for _, p in got), got
+assert not any(k == "minecraft:the_nether" for k, _ in got), got
+assert (f"chesttracker:ender_chest/{EUUID}", "0,0,0") in got, got
+assert r["owners"].get(EUUID) == "T", r["owners"]
+r = c.get("/api/pull", params={"serverId": CANON, "playerUuid": STRANGER}, headers=TOK).json()
+got = {(x["key"], x["pos"]) for x in r["changes"]}
+assert ("minecraft:overworld", "9000,64,9000") in got, got  # legacy: no pos, no gate
+assert ("minecraft:the_nether", "100,64,100") in got, got
+print("range gate ok")
+
 print("ALL API TESTS PASSED")

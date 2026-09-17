@@ -13,9 +13,8 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.ItemStack;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.Nullable;
-import red.jackf.chesttracker.api.memory.CommonKeys;
 import red.jackf.chesttracker.impl.ChestTracker;
-import red.jackf.chesttracker.impl.compat.servers.hypixel.HypixelProvider;
+import red.jackf.chesttracker.impl.memory.EnderChestKeys;
 import red.jackf.chesttracker.impl.memory.MemoryBankAccessImpl;
 import red.jackf.chesttracker.impl.memory.MemoryBankImpl;
 import red.jackf.chesttracker.impl.memory.MemoryKeyImpl;
@@ -47,13 +46,8 @@ import java.util.*;
  */
 public class CMSyncManager {
     public static final CMSyncManager INSTANCE = new CMSyncManager();
-    public static final String MOD_VERSION = "cmsync.2";
+    public static final String MOD_VERSION = "cmsync.3";
     private static final Logger LOGGER = ChestTracker.getLogger("CMSync");
-    private static final Set<Identifier> ENDER_CHEST_KEYS = Set.of(
-            CommonKeys.ENDER_CHEST_KEY,
-            CommonKeys.SHARE_ENDER_CHEST,
-            HypixelProvider.SKYBLOCK_ENDER_CHEST
-    );
 
     private static final double MAX_DELETE_FRACTION = 0.20;
     private static final int MAX_DELETE_COUNT = 50;
@@ -99,6 +93,27 @@ public class CMSyncManager {
 
     public Optional<String> getLastResult() {
         return Optional.ofNullable(lastResult);
+    }
+
+    /** Teammate uuids -> last seen names for ender chest profiles (sidecar cache + live player). */
+    public Map<UUID, String> getOwnerNames(String bankId) {
+        Map<UUID, String> out = new HashMap<>();
+        for (var e : CMSyncSettings.load(bankId).ownerNames.entrySet()) {
+            try {
+                out.put(UUID.fromString(e.getKey()), e.getValue());
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+        return out;
+    }
+
+    @Nullable
+    public String ownerName(String bankId, UUID uuid) {
+        String known = getOwnerNames(bankId).get(uuid);
+        if (known != null) return known;
+        var player = Minecraft.getInstance().player;
+        if (player != null && player.getUUID().equals(uuid)) return player.getName().getString();
+        return null;
     }
 
     private void resetSession() {
@@ -156,11 +171,14 @@ public class CMSyncManager {
         final String mcVersion = gameVersion();
         final DynamicOps<JsonElement> ops =
                 client.level.registryAccess().createSerializationContext(JsonOps.INSTANCE);
+        // player position lets the server withhold far-away containers (range gate)
+        final BlockPos playerPos = client.player.blockPosition();
+        final String dim = client.level.dimension().identifier().toString();
 
         List<RawEntry> snapshot = new ArrayList<>();
         try {
             for (Map.Entry<Identifier, MemoryKeyImpl> e : bank.getMemories().entrySet()) {
-                if (!syncEnder && ENDER_CHEST_KEYS.contains(e.getKey())) continue;
+                if (!syncEnder && EnderChestKeys.isSyncableEnderKey(e.getKey())) continue;
                 String key = e.getKey().toString();
                 MemoryKeyImpl keyImpl = e.getValue();
                 for (Map.Entry<BlockPos, Memory> m : keyImpl.getMemories().entrySet()) {
@@ -195,7 +213,7 @@ public class CMSyncManager {
         CMSyncQueue.executor().execute(() -> {
             try {
                 runSyncJob(client, bankId, url, token, playerUuid, playerName,
-                        serverId, serverName, mcVersion, ops, snapshot);
+                        serverId, serverName, mcVersion, ops, snapshot, playerPos, dim);
             } finally {
                 CMSyncQueue.release();
             }
@@ -210,7 +228,8 @@ public class CMSyncManager {
     /** Background lane: encode NBT + hash + push + pull (blocking). Merge on client thread. */
     private void runSyncJob(Minecraft client, String bankId, String url, String token,
                             String playerUuid, String playerName, String serverId, String serverName,
-                            String mcVersion, DynamicOps<JsonElement> ops, List<RawEntry> snapshot) {
+                            String mcVersion, DynamicOps<JsonElement> ops, List<RawEntry> snapshot,
+                            BlockPos playerPos, String dim) {
         List<JsonObject> changes = new ArrayList<>(snapshot.size());
         List<JsonObject> hashProj = new ArrayList<>(snapshot.size());
         for (RawEntry r : snapshot) {
@@ -264,7 +283,7 @@ public class CMSyncManager {
                             + "). Re-open chests or /cmsync stop if intentional."), ChatFormatting.YELLOW);
                 });
                 // still pull so we don't go stale
-                doPullBlocking(client, bankId, url, token, playerUuid, serverId, playerName, serverName, mcVersion);
+                doPullBlocking(client, bankId, url, token, playerUuid, serverId, playerName, serverName, mcVersion, playerPos, dim);
                 return;
             }
         }
@@ -281,14 +300,14 @@ public class CMSyncManager {
                         || push.result() == CMSyncHttp.Result.NOT_A_CMSYNC_SERVER) {
                     final String note = push.note().isEmpty() ? push.result().name() : push.note();
                     client.execute(() -> handleDeterministic(client, bankId, note));
-                    doPullBlocking(client, bankId, url, token, playerUuid, serverId, playerName, serverName, mcVersion);
+                    doPullBlocking(client, bankId, url, token, playerUuid, serverId, playerName, serverName, mcVersion, playerPos, dim);
                     return;
                 }
                 client.execute(() -> handlePushResult(client, bankId, push.result(),
                         push.result() == CMSyncHttp.Result.SYNCED ? fullHash : prevHash,
                         false, push.note(), changes.size()));
                 if (push.result() == CMSyncHttp.Result.QUARANTINED) {
-                    doPullBlocking(client, bankId, url, token, playerUuid, serverId, playerName, serverName, mcVersion);
+                    doPullBlocking(client, bankId, url, token, playerUuid, serverId, playerName, serverName, mcVersion, playerPos, dim);
                     return;
                 }
             } else if (emptyLocal) {
@@ -297,7 +316,7 @@ public class CMSyncManager {
                     if (bankId.equals(activeBankId)) lastResult = "empty-local, pull-only";
                 });
             }
-            doPullBlocking(client, bankId, url, token, playerUuid, serverId, playerName, serverName, mcVersion);
+            doPullBlocking(client, bankId, url, token, playerUuid, serverId, playerName, serverName, mcVersion, playerPos, dim);
         } catch (RuntimeException ex) {
             LOGGER.error("cmsync job failed", ex);
             client.execute(() -> handlePushResult(client, bankId,
@@ -307,12 +326,13 @@ public class CMSyncManager {
 
     private void doPullBlocking(Minecraft client, String bankId, String url, String token,
                                 String playerUuid, String serverId, String playerName,
-                                String serverName, String mcVersion) {
+                                String serverName, String mcVersion, BlockPos playerPos, String dim) {
         CMSyncHttp.Identity ident = new CMSyncHttp.Identity(
                 playerUuid, playerName, serverId, serverName, mcVersion, MOD_VERSION);
         CMSyncHttp.PullOutcome pull;
         try {
-            pull = CMSyncHttp.pull(url, token, serverId, playerUuid).join();
+            pull = CMSyncHttp.pull(url, token, serverId, playerUuid,
+                    playerPos.getX(), playerPos.getY(), playerPos.getZ(), dim).join();
         } catch (RuntimeException ex) {
             client.execute(() -> handlePullError(client, bankId));
             return;
@@ -322,6 +342,17 @@ public class CMSyncManager {
             if (!bankId.equals(activeBankId)) return;
             if (f.result() == CMSyncHttp.Result.SYNCED) {
                 applyPull(client, bankId, f.changes(), f.tombstones(), playerUuid, mcVersion);
+                if (!f.owners().isEmpty()) {
+                    CMSyncSettings s = CMSyncSettings.load(bankId);
+                    boolean changed = false;
+                    for (var e : f.owners().entrySet()) {
+                        if (!e.getValue().equals(s.ownerNames.get(e.getKey()))) {
+                            s.ownerNames.put(e.getKey(), e.getValue());
+                            changed = true;
+                        }
+                    }
+                    if (changed) s.save(bankId);
+                }
                 lastSuccess = Instant.now();
                 lastResult = "synced";
                 if (failing) {

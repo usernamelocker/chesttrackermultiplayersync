@@ -10,6 +10,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Per-bank CMSync state. Sidecar file (no Metadata.CODEC edit required):
@@ -28,6 +30,8 @@ public class CMSyncSettings {
     public boolean paused = false;
     public int intervalSeconds = DEFAULT_INTERVAL_SECONDS;
     public boolean syncEnderChest = true;
+    /** Teammate uuid -> last seen name (for ender chest profiles). Refreshed on every pull. */
+    public final Map<String, String> ownerNames = new HashMap<>();
 
     public boolean isActive() {
         return enabled && url != null && !paused;
@@ -68,6 +72,14 @@ public class CMSyncSettings {
             if (o.has("paused")) st.paused = o.get("paused").getAsBoolean();
             if (o.has("intervalSeconds")) st.intervalSeconds = o.get("intervalSeconds").getAsInt();
             if (o.has("syncEnderChest")) st.syncEnderChest = o.get("syncEnderChest").getAsBoolean();
+            if (o.has("ownerNames") && o.get("ownerNames").isJsonObject()) {
+                for (var e : o.getAsJsonObject("ownerNames").entrySet()) {
+                    try {
+                        if (!e.getValue().isJsonNull()) st.ownerNames.put(e.getKey(), e.getValue().getAsString());
+                    } catch (RuntimeException ignored) {
+                    }
+                }
+            }
             return st;
         } catch (IOException | RuntimeException e) {
             return new CMSyncSettings();
@@ -85,6 +97,9 @@ public class CMSyncSettings {
             o.addProperty("paused", paused);
             o.addProperty("intervalSeconds", intervalSeconds);
             o.addProperty("syncEnderChest", syncEnderChest);
+            JsonObject owners = new JsonObject();
+            for (var e : ownerNames.entrySet()) owners.addProperty(e.getKey(), e.getValue());
+            o.add("ownerNames", owners);
             Files.writeString(pathFor(bankId), GSON.toJson(o), StandardCharsets.UTF_8);
         } catch (IOException ignored) {
         }

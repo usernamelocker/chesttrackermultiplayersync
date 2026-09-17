@@ -13,6 +13,7 @@ import org.jetbrains.annotations.NotNull;
 import red.jackf.chesttracker.api.memory.*;
 import red.jackf.chesttracker.api.memory.counting.CountingPredicate;
 import red.jackf.chesttracker.api.memory.counting.StackMergeMode;
+import red.jackf.chesttracker.impl.memory.EnderChestKeys;
 
 import java.util.Collections;
 import java.util.List;
@@ -22,9 +23,7 @@ import static net.minecraft.network.chat.Component.translatable;
 
 public class ClientEnderChestPreviewProvider implements PreviewProvider {
     private static Optional<MemoryKey> getNonEmptyEnderChestMemoryKey() {
-        return MemoryBankAccess.INSTANCE.getLoaded()
-                .flatMap(bank -> bank.getKey(CommonKeys.ENDER_CHEST_KEY))
-                .filter(key -> !key.isEmpty());
+        return MemoryBankAccess.INSTANCE.getLoaded().flatMap(EnderChestKeys::getOwn);
     }
 
     @Override
@@ -37,12 +36,12 @@ public class ClientEnderChestPreviewProvider implements PreviewProvider {
         Optional<MemoryBank> bank = MemoryBankAccess.INSTANCE.getLoaded();
         if (bank.isEmpty()) return Collections.emptyList();
         if (ShulkerBoxTooltipApi.getCurrentPreviewType(true) == PreviewType.FULL) {
-            return bank.get().getKey(CommonKeys.ENDER_CHEST_KEY)
+            return EnderChestKeys.getOwn(bank.get())
                     .flatMap(key -> key.get(BlockPos.ZERO))
                     .map(Memory::fullItems)
                     .orElse(List.of());
         } else {
-            return bank.get().getCounts(CommonKeys.ENDER_CHEST_KEY, CountingPredicate.TRUE, StackMergeMode.NEVER);
+            return EnderChestKeys.getOwnCounts(bank.get(), CountingPredicate.TRUE, StackMergeMode.NEVER, false);
         }
     }
 

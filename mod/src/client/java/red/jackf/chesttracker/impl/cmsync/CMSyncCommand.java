@@ -1,23 +1,19 @@
 package red.jackf.chesttracker.impl.cmsync;
 
-import com.mojang.brigadier.arguments.StringArgumentType;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.minecraft.ChatFormatting;
-import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 import red.jackf.chesttracker.impl.memory.MemoryBankAccessImpl;
 import red.jackf.chesttracker.impl.memory.MemoryBankImpl;
 import red.jackf.jackfredlib.client.api.gps.Coordinate;
 
-import java.net.URI;
 import java.time.Duration;
 import java.util.Optional;
 
 /**
- * /cmsync connect &lt;url&gt; [token] | gui | stop | status
- * Token input: chat command (2nd word) OR /cmsync gui screen boxes. No other place.
+ * /cmsync status | stop. Connecting happens in the Memory Bank menu (CMSync tab).
  */
 public class CMSyncCommand {
     private CMSyncCommand() {
@@ -27,11 +23,6 @@ public class CMSyncCommand {
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> dispatcher.register(
                 ClientCommandManager.literal("cmsync")
                         .executes(ctx -> help(ctx.getSource()))
-                        .then(ClientCommandManager.literal("connect")
-                                .then(ClientCommandManager.argument("url", StringArgumentType.greedyString())
-                                        .executes(ctx -> connect(ctx.getSource(), StringArgumentType.getString(ctx, "url"), null))))
-                        .then(ClientCommandManager.literal("gui")
-                                .executes(ctx -> gui(ctx.getSource())))
                         .then(ClientCommandManager.literal("stop")
                                 .executes(ctx -> stop(ctx.getSource())))
                         .then(ClientCommandManager.literal("status")
@@ -40,78 +31,8 @@ public class CMSyncCommand {
     }
 
     private static int help(FabricClientCommandSource source) {
-        source.sendFeedback(Component.literal("CMSync: /cmsync connect <url> [token] | /cmsync gui | /cmsync status | /cmsync stop")
+        source.sendFeedback(Component.literal("CMSync: connect in the Memory Bank menu (CMSync tab) | /cmsync status | /cmsync stop")
                 .withStyle(ChatFormatting.GRAY));
-        return 1;
-    }
-
-    private static int gui(FabricClientCommandSource source) {
-        source.getClient().execute(CMSyncScreen::open);
-        return 1;
-    }
-
-    private static String gameVersion() {
-        try {
-            return net.minecraft.SharedConstants.getCurrentVersion().name();
-        } catch (Throwable t) {
-            return "unknown";
-        }
-    }
-
-    private static int connect(FabricClientCommandSource source, String urlRaw, String token) {
-        // token as second word inside greedy url: "<url> <token>"
-        String url = urlRaw.strip();
-        String tok = token;
-        String[] parts = url.split("\\s+", 2);
-        if (parts.length == 2 && tok == null) {
-            url = parts[0];
-            tok = parts[1];
-        }
-        final String finalToken = tok;
-
-        Optional<MemoryBankImpl> bankOpt = MemoryBankAccessImpl.INSTANCE.getLoadedInternal();
-        Optional<Coordinate> coordOpt = Coordinate.getCurrent();
-        if (bankOpt.isEmpty() || coordOpt.isEmpty()) {
-            source.sendError(Component.literal("No memory bank loaded (join your server first)"));
-            return 0;
-        }
-        URI parsed = CMSyncHttp.parseBaseUrl(url);
-        if (parsed == null) {
-            source.sendError(Component.literal("Invalid URL: " + url));
-            return 0;
-        }
-        MemoryBankImpl bank = bankOpt.get();
-        final String bankId = bank.getId();
-        Coordinate coord = coordOpt.get();
-        CMSyncHttp.Identity ident = new CMSyncHttp.Identity(
-                source.getPlayer().getUUID().toString(),
-                source.getPlayer().getName().getString(),
-                coord.id(), coord.userFriendlyName(),
-                gameVersion(), CMSyncManager.MOD_VERSION);
-        source.sendFeedback(Component.literal("Connecting CMSync → " + parsed).withStyle(ChatFormatting.GRAY));
-        CMSyncHttp.handshake(parsed.toString(), finalToken, ident).whenComplete((r, t) ->
-                source.getClient().execute(() -> {
-                    CMSyncHttp.Result res = t != null ? CMSyncHttp.Result.CONNECTION_FAILED : r;
-                    if (res == CMSyncHttp.Result.SYNCED) {
-                        Optional<MemoryBankImpl> cur = MemoryBankAccessImpl.INSTANCE.getLoadedInternal();
-                        if (cur.isEmpty() || !cur.get().getId().equals(bankId)) {
-                            source.sendError(Component.literal("World changed during connect"));
-                            return;
-                        }
-                        CMSyncSettings s = CMSyncSettings.load(bankId);
-                        s.url = parsed.toString();
-                        s.token = finalToken;
-                        s.enabled = true;
-                        s.paused = false;
-                        s.boundServerId = coord.id();
-                        s.save(bankId);
-                        CMSyncManager.INSTANCE.markActivated(bankId, coord.id());
-                        MemoryBankAccessImpl.INSTANCE.save();
-                        source.sendFeedback(Component.literal("CMSync SYNCED (" + coord.id() + ")").withStyle(ChatFormatting.GREEN));
-                    } else {
-                        source.sendError(Component.literal("CMSync failed: " + res));
-                    }
-                }));
         return 1;
     }
 

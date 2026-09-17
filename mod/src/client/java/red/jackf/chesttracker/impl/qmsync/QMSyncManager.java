@@ -11,9 +11,8 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.util.Util;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.Nullable;
-import red.jackf.chesttracker.api.memory.CommonKeys;
 import red.jackf.chesttracker.impl.ChestTracker;
-import red.jackf.chesttracker.impl.compat.servers.hypixel.HypixelProvider;
+import red.jackf.chesttracker.impl.memory.EnderChestKeys;
 import red.jackf.chesttracker.impl.memory.MemoryBankAccessImpl;
 import red.jackf.chesttracker.impl.memory.MemoryBankImpl;
 import red.jackf.chesttracker.impl.memory.MemoryKeyImpl;
@@ -27,7 +26,6 @@ import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -40,11 +38,6 @@ import net.minecraft.resources.Identifier;
 public class QMSyncManager {
     public static final QMSyncManager INSTANCE = new QMSyncManager();
     private static final Logger LOGGER = ChestTracker.getLogger("QMSync");
-    private static final Set<Identifier> ENDER_CHEST_KEYS = Set.of(
-            CommonKeys.ENDER_CHEST_KEY,
-            CommonKeys.SHARE_ENDER_CHEST,
-            HypixelProvider.SKYBLOCK_ENDER_CHEST
-    );
 
     /** Bank id the manager has announced/is active for; null when no synced bank is loaded. */
     @Nullable
@@ -139,7 +132,7 @@ public class QMSyncManager {
         final boolean stripNames = !settings.syncContainerNames;
         final Map<Identifier, MemoryKeyImpl> snapshot = new HashMap<>();
         for (Map.Entry<Identifier, MemoryKeyImpl> entry : bank.getMemories().entrySet()) {
-            if (!settings.syncEnderChest && ENDER_CHEST_KEYS.contains(entry.getKey())) continue;
+            if (!settings.syncEnderChest && EnderChestKeys.isSyncableEnderKey(entry.getKey())) continue;
             snapshot.put(entry.getKey(), entry.getValue());
         }
         final DynamicOps<JsonElement> ops = client.level.registryAccess().createSerializationContext(JsonOps.INSTANCE);

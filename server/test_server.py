@@ -42,10 +42,43 @@ def test_mass_delete_guard():
     assert db.should_quarantine_mass_delete(100, 5) is False
     assert db.should_quarantine_mass_delete(0, 0) is False
     assert db.should_quarantine_mass_delete(10, 50) is True
-    assert db.should_quarantine_mass_delete(3, 3) is False  # tiny banks exempt from fraction rule
+    assert db.should_quarantine_mass_delete(3, 3) is False
     assert db.should_quarantine_mass_delete(9, 9) is False
-    assert db.should_quarantine_mass_delete(10, 3) is True  # 30% of a 10-bank quarantines
+    assert db.should_quarantine_mass_delete(10, 3) is True
     print("guard ok")
+
+
+def _chg(key, pos, hour, deleted=False):
+    return {"key": key, "pos": pos, "deleted": deleted, "updatedAt": f"2026-09-15T{hour:02d}:00:00Z",
+            "updatedBy": "a", "mcVersion": "1.21.11",
+            "items": [] if deleted else [{"id": "minecraft:stone", "count": 1}]}
+
+
+def test_range_gate():
+    assert db.in_range("100,64,100", "minecraft:overworld", "minecraft:overworld", 0, 64, 0, 5000) is True
+    assert db.in_range("9000,64,0", "minecraft:overworld", "minecraft:overworld", 0, 64, 0, 5000) is False
+    assert db.in_range("100,64,100", "minecraft:the_nether", "minecraft:overworld", 0, 64, 0, 5000) is False
+    assert db.in_range("99999,64,99999", "chesttracker:ender_chest/aaa", "minecraft:overworld", 0, 64, 0, 5000) is True
+    assert db.in_range("bogus", "minecraft:overworld", "minecraft:overworld", 0, 64, 0, 5000) is False
+    p = _tmpdb()
+    con = db.connect(p)
+    s = "multiplayer/test"
+    db.apply_changes(con, s, [_chg("minecraft:overworld", "10,64,10", 10),
+                              _chg("minecraft:overworld", "9000,64,9000", 10),
+                              _chg("minecraft:the_nether", "10,64,10", 10),
+                              _chg("chesttracker:ender_chest/aaa", "0,0,0", 10)])
+    db.apply_changes(con, s, [_chg("minecraft:overworld", "9001,64,9001", 11, deleted=True)])
+    changes, tombs = db.select_pull(con, s, "minecraft:overworld", 0, 64, 0, 5000)
+    assert {c["pos"] for c in changes} == {"10,64,10", "0,0,0"}, [c["pos"] for c in changes]
+    assert tombs == [], tombs  # far tombstone withheld too
+    changes, tombs = db.select_pull(con, s)
+    assert len(changes) == 4 and len(tombs) == 1  # legacy ungated pull: everything
+    n = db.record_owners(con, s, [_chg("chesttracker:ender_chest/aaa", "0,0,0", 10)], "u1", "Steve")
+    assert n == 1 and db.get_owners(con, s) == {"a": "Steve"}  # uuid from change.updatedBy
+    n = db.record_owners(con, s, [_chg("minecraft:overworld", "10,64,10", 10)], "u1", "Steve")
+    assert n == 0  # world keys never tracked
+    con.close()
+    print("range+owners ok")
 
 def test_snapshot_restore():
     p = _tmpdb()
@@ -65,5 +98,6 @@ def test_snapshot_restore():
 if __name__ == "__main__":
     test_lww()
     test_mass_delete_guard()
+    test_range_gate()
     test_snapshot_restore()
     print("ALL SERVER TESTS PASSED")

@@ -17,7 +17,7 @@ snapshot → delete → restore.
 2. Mod: apply overlay to QMSync checkout (see `client/overlay/README.md`), `gradlew.bat runClient` twice
    (or 2 PCs) with different accounts on same MC server.
 3. Player A: `/cmsync status` → copy `server: [...]\[multiplayer/...]` into server `.env`, restart server.
-4. Both: `/cmsync connect https://<vps> <token>` → expect `SYNCED`.
+4. Both: Memory Bank menu → CMSync tab → connect → expect `SYNCED`.
 5. A opens chest with iron → wait 10s → B searches iron (grave key) → must find A's chest.
 6. B breaks/empties that chest → A pulls tombstone within ~10-15s.
 7. Hub-wipe test: A joins lobby/hub (different `serverId`) → `/cmsync status` shows bound mismatch, no push;

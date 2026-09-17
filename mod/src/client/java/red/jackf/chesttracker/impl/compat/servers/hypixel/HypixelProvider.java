@@ -21,6 +21,7 @@ import red.jackf.chesttracker.api.providers.context.ScreenCloseContext;
 import red.jackf.chesttracker.api.providers.context.ScreenOpenContext;
 import red.jackf.chesttracker.api.providers.defaults.DefaultProvider;
 import red.jackf.chesttracker.impl.ChestTracker;
+import red.jackf.chesttracker.impl.memory.EnderChestKeys;
 import red.jackf.jackfredlib.client.api.gps.Coordinate;
 import red.jackf.jackfredlib.client.api.gps.ScoreboardSnapshot;
 import red.jackf.whereisit.api.search.ConnectedBlocksGrabber;
@@ -131,7 +132,8 @@ public class HypixelProvider extends ServerProvider {
                             .inContainer(Blocks.ENDER_CHEST)
                             .build();
 
-                    bank.addMemory(SKYBLOCK_ENDER_CHEST, new BlockPos(page.get(), 0, 0), memory);
+                    bank.addMemory(EnderChestKeys.ownHypixelKey(SKYBLOCK_ENDER_CHEST),
+                            new BlockPos(page.get(), 0, 0), memory);
                 }
             }
             if (context.getTitle().getString().contains("Backpack")) {
@@ -142,7 +144,8 @@ public class HypixelProvider extends ServerProvider {
                             .inContainer(Blocks.SHULKER_BOX)
                             .build();
 
-                    bank.addMemory(SKYBLOCK_BACKBACKS, new BlockPos(page.get(), 0, 0), memory);
+                    bank.addMemory(EnderChestKeys.ownHypixelKey(SKYBLOCK_BACKBACKS),
+                            new BlockPos(page.get(), 0, 0), memory);
                 }
             }
             if (context.getTitle().getString().contains("Sack")) {
@@ -155,7 +158,7 @@ public class HypixelProvider extends ServerProvider {
                         .inContainer(Block.byItem(Items.BUNDLE))
                         .build();
 
-                bank.addMemory(SKYBLOCK_SACKS, fakePosition, memory);
+                    bank.addMemory(EnderChestKeys.ownHypixelKey(SKYBLOCK_SACKS), fakePosition, memory);
             }
             if (context.getTitle().getString().contains("Personal Vault")) {
                 Optional<Integer> page = Skyblock.getPersonalVault(context.getTitle());
@@ -165,7 +168,8 @@ public class HypixelProvider extends ServerProvider {
                             .inContainer(Block.byItem(Items.IRON_DOOR))
                             .build();
 
-                    bank.addMemory(SKYBLOCK_VAULT, new BlockPos(page.get(), 0, 0), memory);
+                    bank.addMemory(EnderChestKeys.ownHypixelKey(SKYBLOCK_VAULT),
+                            new BlockPos(page.get(), 0, 0), memory);
                 }
             }
         } else if (this.isOnSMP) {

@@ -35,6 +35,9 @@ public class MemoryBankAccessImpl implements MemoryBankAccess {
             bank.setId(memoryBankId);
             return bank;
         });
+        // one-time move of legacy shared ender chest data into the player's own key
+        var player = net.minecraft.client.Minecraft.getInstance().player;
+        EnderChestKeys.migrateBank(loaded, player != null ? player.getUUID() : null);
         INSTANCE.save();
 
         return true;

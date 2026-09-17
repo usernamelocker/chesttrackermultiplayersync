@@ -11,10 +11,10 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
-import red.jackf.chesttracker.api.memory.CommonKeys;
 import red.jackf.chesttracker.api.memory.MemoryBankAccess;
 import red.jackf.chesttracker.api.memory.counting.CountingPredicate;
 import red.jackf.chesttracker.api.memory.counting.StackMergeMode;
+import red.jackf.chesttracker.impl.memory.EnderChestKeys;
 import red.jackf.chesttracker.api.providers.ProviderUtils;
 import red.jackf.chesttracker.impl.config.ChestTrackerConfig;
 
@@ -34,7 +34,7 @@ public abstract class MaterialListUtilsMixin {
         if (config.countEnderChestMaterials || config.countNearbyMaterials) {
             MemoryBankAccess.INSTANCE.getLoaded().ifPresent(bank -> {
                 if (config.countEnderChestMaterials) {
-                    for (ItemStack stack : bank.getCounts(CommonKeys.ENDER_CHEST_KEY, CountingPredicate.TRUE, StackMergeMode.ALL, true)) {
+                    for (ItemStack stack : EnderChestKeys.getOwnCounts(bank, CountingPredicate.TRUE, StackMergeMode.ALL, true)) {
                         inventoryStacks.addTo(new ItemType(stack, true, false), stack.getCount());
                     }
                 }

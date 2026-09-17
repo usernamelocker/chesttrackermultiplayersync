@@ -17,6 +17,7 @@ import db
 from models import Change, HandshakeRequest, PushRequest
 
 app = FastAPI(title="CMSync", version="2.0.0")
+CMSYNC_SERVER = "2.1"  # bump on any server behavior change; visible in /health
 _log = logging.getLogger("cmsync")
 # Explicit handler: uvicorn's default config leaves the root logger handler-less,
 # so INFO records would silently vanish (only WARNING+ reaches stderr).
@@ -78,7 +79,8 @@ def _deny(reason: str, status: int = 200):
 
 @app.get("/health")
 def health():
-    return {"ok": True, "time": time.time(), "expectedServer": config.EXPECTED_SERVER_ID}
+    return {"ok": True, "time": time.time(), "expectedServer": config.EXPECTED_SERVER_ID,
+            "cmsync": CMSYNC_SERVER}
 
 
 @app.get("/", include_in_schema=False)
@@ -120,6 +122,7 @@ def push(req: PushRequest, x_cmsync_token: str | None = Header(default=None, ali
 
     changes = [c.model_dump() for c in req.changes]
     with _con() as con:
+        db.record_owners(con, sid, changes, req.playerUuid, req.playerName)
         existing = db.container_count(con, sid)
         deletes = sum(1 for c in changes if c.get("deleted"))
 
@@ -154,6 +157,8 @@ def _maybe_snapshot(con, server_id: str) -> None:
 @app.get("/api/pull")
 def pull(serverId: str = Query(...), since: str | None = Query(default=None),
          playerUuid: str = Query(...),
+         px: int | None = Query(default=None), py: int | None = Query(default=None),
+         pz: int | None = Query(default=None), dim: str | None = Query(default=None),
          x_cmsync_token: str | None = Header(default=None, alias="X-CMSync-Token")):
     sid = config.canonical_server_id(serverId)
     if config.EXPECTED_SERVER_ID and sid != config.EXPECTED_SERVER_ID:
@@ -162,18 +167,11 @@ def pull(serverId: str = Query(...), since: str | None = Query(default=None),
     if denied:
         return denied
     with _con() as con:
-        state = db.full_state(con, sid)
-        changes = []
-        for key, positions in state.items():
-            for pos, mem in positions.items():
-                if since and mem.get("updatedAt", "") <= since:
-                    continue
-                changes.append({"key": key, "pos": pos, "deleted": False, **mem})
-        tombs = [dict(r) for r in con.execute(
-            "SELECT key,pos,deleted_at FROM tombstones WHERE server_id=?", (sid,))]
+        changes, tombs = db.select_pull(con, sid, dim, px, py, pz, config.RANGE_BLOCKS)
+        owners = db.get_owners(con, sid)
         return {"status": "SYNCED", "serverTime": time.time(), "cursor": since or "",
-                "changes": changes, "tombstones": tombs,
-                "containers": sum(len(v) for v in state.values())}
+                "changes": changes, "tombstones": tombs, "owners": owners,
+                "containers": db.container_count(con, sid)}
 
 @app.get("/api/pullWebPage")
 def pull(serverId: str = Query(...), since: str | None = Query(default=None),
