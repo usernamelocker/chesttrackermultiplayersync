@@ -20,6 +20,7 @@ import red.jackf.whereisit.client.api.events.SearchRequestPopulator;
 /**
  * Adds a 'Search' button to each individual material entry on the material list.
  */
+
 @Mixin(value = WidgetMaterialListEntry.class, remap = false)
 public abstract class WidgetMaterialListEntryMixin extends WidgetListEntrySortable<MaterialListEntry> {
     private WidgetMaterialListEntryMixin(int x, int y, int width, int height, MaterialListEntry entry, int listIndex) {

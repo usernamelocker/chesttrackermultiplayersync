@@ -3,7 +3,7 @@ package red.jackf.chesttracker.impl;
 import com.mojang.blaze3d.platform.InputConstants;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
+import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenKeyboardEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
@@ -35,8 +35,6 @@ import red.jackf.chesttracker.impl.memory.MemoryIntegrity;
 import red.jackf.chesttracker.impl.memory.MemoryKeyImpl;
 import red.jackf.chesttracker.impl.memory.key.OverrideInfo;
 import red.jackf.chesttracker.impl.providers.InteractionTrackerImpl;
-import red.jackf.chesttracker.impl.qmsync.QMSyncCommand;
-import red.jackf.chesttracker.impl.qmsync.QMSyncManager;
 import red.jackf.chesttracker.impl.providers.ProviderHandler;
 import red.jackf.chesttracker.impl.providers.ScreenCloseContextImpl;
 import red.jackf.chesttracker.impl.providers.ScreenOpenContextImpl;
@@ -66,7 +64,7 @@ public class ChestTracker implements ClientModInitializer {
     }
     public static final KeyMapping.Category CHESTTRACKER_CATEGORY =
             new KeyMapping.Category(Identifier.fromNamespaceAndPath("chesttracker", "title"));
-    public static final KeyMapping OPEN_GUI = KeyBindingHelper.registerKeyBinding(
+    public static final KeyMapping OPEN_GUI = KeyMappingHelper.registerKeyMapping(
             new KeyMapping("key.chesttracker.open_gui", InputConstants.Type.KEYSYM, InputConstants.KEY_GRAVE, CHESTTRACKER_CATEGORY)
     );
 
@@ -97,7 +95,7 @@ public class ChestTracker implements ClientModInitializer {
                     openInGame(client, null);
         });
 
-        ClientTickEvents.START_WORLD_TICK.register(ignored -> MemoryBankAccessImpl.INSTANCE.getLoadedInternal().ifPresent(bank -> {
+        ClientTickEvents.START_LEVEL_TICK.register(ignored -> MemoryBankAccessImpl.INSTANCE.getLoadedInternal().ifPresent(bank -> {
             bank.getMetadata().incrementLoadedTime();
         }));
 
@@ -183,12 +181,10 @@ public class ChestTracker implements ClientModInitializer {
         ProviderHandler.INSTANCE.setupEvents();
         InteractionTrackerImpl.setup();
         MemoryIntegrity.setup();
-        QMSyncCommand.register();
-        QMSyncManager.INSTANCE.setup();
-        red.jackf.chesttracker.impl.cmsync.CMSyncManager.INSTANCE.setup();
-        red.jackf.chesttracker.impl.cmsync.CMSyncCommand.register();
         ImagePixelReader.setup();
         Storage.setup();
+        red.jackf.chesttracker.impl.cmsync.CMSyncManager.INSTANCE.setup();
+        red.jackf.chesttracker.impl.cmsync.CMSyncCommand.register();
         DeveloperOverlay.setup();
         ConnectionSettings.load();
         GlobalMemoryBankDefaults.load();

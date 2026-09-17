@@ -558,9 +558,9 @@ public class CMSyncManager {
 
     private void sendChat(Minecraft client, Component msg, ChatFormatting color) {
         if (client.player == null) return;
-        client.player.displayClientMessage(
+        client.player.sendSystemMessage(
                 Component.literal("[CMSync] ").withStyle(ChatFormatting.GRAY)
-                        .append(msg.copy().withStyle(color)), false);
+                        .append(msg.copy().withStyle(color)));
     }
 
     private static String gameVersion() {

@@ -37,8 +37,6 @@ public class FilteringSettings {
         ));
     });
 
-    // auto-record by default: every opened container is remembered (and, with CMSync
-    // team sync on, shared). Turn on Manual Mode to go back to opt-in per container.
     public boolean manualMode = false;
     public boolean onlyRememberNamed = false;
     public RememberedContainers rememberedContainers = RememberedContainers.ALL;

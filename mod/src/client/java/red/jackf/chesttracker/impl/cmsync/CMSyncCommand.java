@@ -1,6 +1,6 @@
 package red.jackf.chesttracker.impl.cmsync;
 
-import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommands;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.minecraft.ChatFormatting;
@@ -21,11 +21,11 @@ public class CMSyncCommand {
 
     public static void register() {
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> dispatcher.register(
-                ClientCommandManager.literal("cmsync")
+                ClientCommands.literal("cmsync")
                         .executes(ctx -> help(ctx.getSource()))
-                        .then(ClientCommandManager.literal("stop")
+                        .then(ClientCommands.literal("stop")
                                 .executes(ctx -> stop(ctx.getSource())))
-                        .then(ClientCommandManager.literal("status")
+                        .then(ClientCommands.literal("status")
                                 .executes(ctx -> status(ctx.getSource())))
         ));
     }

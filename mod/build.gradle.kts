@@ -2,7 +2,7 @@
 
 import com.github.breadmoirai.githubreleaseplugin.GithubReleaseTask
 import me.modmuss50.mpp.ReleaseType
-import net.fabricmc.loom.task.RemapJarTask
+import org.gradle.jvm.tasks.Jar
 import org.ajoberstar.grgit.Grgit
 import red.jackf.GenerateChangelogTask
 import red.jackf.UpdateDependenciesTask
@@ -10,7 +10,7 @@ import io.github.klahap.dotenv.DotEnvBuilder.Companion.dotEnv
 
 plugins {
     id("maven-publish")
-    id("fabric-loom") version "1.14-SNAPSHOT"
+    id("net.fabricmc.fabric-loom") version "1.15-SNAPSHOT"
     id("com.github.breadmoirai.github-release") version "2.5.2"
     id("org.ajoberstar.grgit") version "5.3.0"
     id("io.github.klahap.dotenv") version "1.1.3"
@@ -54,15 +54,6 @@ base {
 }
 
 repositories {
-    // Parchment Mappings
-    maven {
-        name = "ParchmentMC"
-        url = uri("https://maven.parchmentmc.org")
-        content {
-            includeGroup("org.parchmentmc.data")
-        }
-    }
-
     // Mod Menu, EMI
     maven {
         name = "TerraformersMC"
@@ -70,6 +61,16 @@ repositories {
         content {
             includeGroup("com.terraformersmc")
             includeGroup("dev.emi")
+        }
+    }
+
+    // PB4 / Placeholder API
+    maven {
+        name = "Nucleoid"
+        url = uri("https://maven.nucleoid.xyz/")
+        content {
+            includeGroup("eu.pb4")
+            includeGroup("xyz.nucleoid")
         }
     }
 
@@ -189,20 +190,16 @@ loom {
 dependencies {
     // To change the versions see the gradle.properties file
     minecraft("com.mojang:minecraft:${properties["minecraft_version"]}")
-    mappings(loom.layered {
-        officialMojangMappings()
-        parchment("org.parchmentmc.data:parchment-${properties["parchment_version"]}@zip")
-    })
-    modImplementation("net.fabricmc:fabric-loader:${properties["loader_version"]}")
+    implementation("net.fabricmc:fabric-loader:${properties["loader_version"]}")
 
-    modImplementation("net.fabricmc.fabric-api:fabric-api:${properties["fabric-api_version"]}")
+    implementation("net.fabricmc.fabric-api:fabric-api:${properties["fabric-api_version"]}")
 
     // Where is it
-    modImplementation("red.jackf:whereisit:${properties["where-is-it_version"]}")
+    implementation("red.jackf:whereisit:${properties["where-is-it_version"]}")
     include("red.jackf:whereisit:${properties["where-is-it_version"]}")
 
     // Config
-    modImplementation("dev.isxander:yet-another-config-lib:${properties["yacl_version"]}") {
+    implementation("dev.isxander:yet-another-config-lib:${properties["yacl_version"]}") {
         exclude(group = "com.terraformersmc", module = "modmenu")
     }
 
@@ -215,42 +212,41 @@ dependencies {
     ////////////////
 
     // Searchables
-    modCompileOnly("com.blamejared.searchables:Searchables-fabric-${properties["searchables_version"]}") {
+    compileOnly("com.blamejared.searchables:Searchables-fabric-${properties["searchables_version"]}") {
         exclude(group = "net.fabricmc.fabric-api", module = "fabric-api")
     }
-    modLocalRuntime("com.blamejared.searchables:Searchables-fabric-${properties["searchables_version"]}") {
+    runtimeOnly("com.blamejared.searchables:Searchables-fabric-${properties["searchables_version"]}") {
         exclude(group = "net.fabricmc.fabric-api", module = "fabric-api")
     }
     if (isBundlingSearchables) include("com.blamejared.searchables:Searchables-fabric-${properties["searchables_version"]}")
 
     // Mod Menu
-    modCompileOnly("com.terraformersmc:modmenu:${properties["modmenu_version"]}")
-    modLocalRuntime("com.terraformersmc:modmenu:${properties["modmenu_version"]}")
+    compileOnly("com.terraformersmc:modmenu:${properties["modmenu_version"]}")
+    localRuntime("com.terraformersmc:modmenu:${properties["modmenu_version"]}")
 
     // Shulker Box Tooltip
-    modCompileOnly("com.misterpemodder:shulkerboxtooltip-fabric:${properties["shulkerboxtooltip_version"]}")
+    compileOnly("com.misterpemodder:shulkerboxtooltip-fabric:${properties["shulkerboxtooltip_version"]}")
 
-    //modLocalRuntime("com.misterpemodder:shulkerboxtooltip-fabric:${properties["shulkerboxtooltip_version"]}")
-    //modLocalRuntime("me.shedaniel.cloth:cloth-config-fabric:${properties["clothconfig_version"]}")
+    //runtimeOnly("com.misterpemodder:shulkerboxtooltip-fabric:${properties["shulkerboxtooltip_version"]}")
+    //runtimeOnly("me.shedaniel.cloth:cloth-config-fabric:${properties["clothconfig_version"]}")
 
     // WTHIT
-    modCompileOnly("mcp.mobius.waila:wthit-api:${properties["wthit_version"]}")
+    compileOnly("mcp.mobius.waila:wthit-api:${properties["wthit_version"]}")
 
-    //modLocalRuntime("mcp.mobius.waila:wthit:${properties["wthit_version"]}")
-    //modLocalRuntime("lol.bai:badpackets:${properties["badpackets_version"]}")
+    //runtimeOnly("mcp.mobius.waila:wthit:${properties["wthit_version"]}")
+    //runtimeOnly("lol.bai:badpackets:${properties["badpackets_version"]}")
 
     // Jade
-    modCompileOnly("maven.modrinth:jade:${properties["jade_version"]}")
-
-    modLocalRuntime("maven.modrinth:jade:${properties["jade_version"]}")
+    compileOnly("maven.modrinth:jade:${properties["jade_version"]}")
+    localRuntime("maven.modrinth:jade:${properties["jade_version"]}")
 
     // Litematica
     //modCompileOnly("maven.modrinth:litematica:${properties["litematica_version"]}")
     //modCompileOnly("maven.modrinth:malilib:${properties["malilib_version"]}")
-    modCompileOnly(fileTree("libs"))
+    compileOnly(fileTree("libs"))
 
-    //modLocalRuntime("maven.modrinth:litematica:${properties["litematica_version"]}")
-    //modLocalRuntime("maven.modrinth:malilib:${properties["malilib_version"]}")
+    //runtimeOnly("maven.modrinth:litematica:${properties["litematica_version"]}")
+    //runtimeOnly("maven.modrinth:malilib:${properties["malilib_version"]}")
 }
 
 tasks.withType<ProcessResources>().configureEach {
@@ -260,7 +256,7 @@ tasks.withType<ProcessResources>().configureEach {
 }
 
 tasks.withType<JavaCompile>().configureEach {
-    options.release.set(21)
+    options.release.set(25)
 }
 
 tasks.jar {
@@ -273,7 +269,7 @@ tasks.jar {
 publishing {
     publications {
         create<MavenPublication>("mavenJava") {
-            from(components["java"]!!)
+            from(components["java"])
 
             pom {
                 name = project.properties["mod_name"].toString()
@@ -366,7 +362,7 @@ if (canPublish) {
 
     val changelogTextProvider = if (generateChangelogTask != null) {
         provider {
-            generateChangelogTask!!.get().changelogFile.get().asFile.readText()
+            generateChangelogTask.get().changelogFile.get().asFile.readText()
         }
     } else {
         provider {
@@ -385,13 +381,13 @@ if (canPublish) {
         releaseName = "${properties["mod_name"]} $newTag"
         targetCommitish = grgit!!.branch.current().name
         releaseAssets.from(
-            tasks["remapJar"].outputs.files,
-            tasks["remapSourcesJar"].outputs.files,
+            tasks["jar"].outputs.files,
+            tasks["sourcesJar"].outputs.files,
         )
         subprojects.forEach {
             releaseAssets.from(
-                it.tasks["remapJar"].outputs.files,
-                it.tasks["remapSourcesJar"].outputs.files,
+                it.tasks["jar"].outputs.files,
+                it.tasks["sourcesJar"].outputs.files,
             )
         }
 
@@ -409,7 +405,7 @@ if (canPublish) {
             })
             modLoaders.add("fabric")
             modLoaders.add("quilt")
-            file.set(tasks.named<RemapJarTask>("remapJar").get().archiveFile)
+            file.set(tasks.named<Jar>("jar").get().archiveFile)
 
             if (System.getenv().containsKey("CURSEFORGE_TOKEN") || dryRun.get()) {
                 curseforge {
@@ -429,7 +425,7 @@ if (canPublish) {
                             slug.set(it)
                         }
                     }
-                    listOf("emi", "jei", "roughly-enough-items", "modmenu", "shulkerboxtooltip", "wthit", "jade").forEach {
+                    listOf("modmenu", "shulkerboxtooltip", "wthit", "jade").forEach {
                         optional {
                             slug.set(it)
                         }
@@ -444,6 +440,8 @@ if (canPublish) {
                             slug.set("searchables")
                         }
                     }
+                    clientRequired = true
+                    serverRequired = false
                 }
             }
 
@@ -465,7 +463,7 @@ if (canPublish) {
                             slug.set(it)
                         }
                     }
-                    listOf("emi", "jei", "rei", "modmenu", "shulkerboxtooltip", "wthit", "jade").forEach {
+                    listOf("modmenu", "shulkerboxtooltip", "wthit", "jade").forEach {
                         optional {
                             slug.set(it)
                         }

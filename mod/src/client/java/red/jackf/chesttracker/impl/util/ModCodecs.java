@@ -8,6 +8,7 @@ import com.mojang.serialization.Dynamic;
 import com.mojang.serialization.DynamicOps;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Holder;
 import net.minecraft.core.component.DataComponentPatch;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.util.ExtraCodecs;
@@ -25,18 +26,47 @@ import java.util.function.Predicate;
  * Codecs for classes that aren't ours
  */
 public class ModCodecs {
+    private static final Codec<DataComponentPatch> SAFE_COMPONENT_PATCH_CODEC = new Codec<>() {
+        @Override
+        public <T> DataResult<Pair<DataComponentPatch, T>> decode(DynamicOps<T> ops, T input) {
+            DataResult<Pair<DataComponentPatch, T>> res = DataComponentPatch.CODEC.decode(ops, input);
+            if (res.isError()) {
+                return DataResult.success(Pair.of(DataComponentPatch.EMPTY, input));
+            }
+            return res;
+        }
+
+        @Override
+        public <T> DataResult<T> encode(DataComponentPatch input, DynamicOps<T> ops, T prefix) {
+            DataResult<T> res = DataComponentPatch.CODEC.encode(input, ops, prefix);
+            if (res.isError()) {
+                FileUtil.LOGGER.warn("Failed to encode item DataComponentPatch ({}); falling back to empty patch for item", res.error().get().message());
+                return DataComponentPatch.CODEC.encode(DataComponentPatch.EMPTY, ops, prefix);
+            }
+            return res;
+        }
+    };
+
     /**
      * Identical to {@link ItemStack#OPTIONAL_CODEC}, but will not enforce a max stack size of 99.
      */
     public static final Codec<ItemStack> OPTIONAL_ITEMSTACK_UNCAPPED_SIZE = ExtraCodecs.<ItemStack>optionalEmptyMap(Codec.lazyInitialized(
             () -> RecordCodecBuilder.create(
                     instance -> instance.group(
-                            Item.CODEC.fieldOf("id").forGetter(ItemStack::getItemHolder),
+                            // Item.CODEC.fieldOf("id").forGetter(ItemStack::getItem),
+                            Item.CODEC.fieldOf("id").forGetter(stack -> BuiltInRegistries.ITEM.wrapAsHolder(stack.getItem())),
                             ExtraCodecs.POSITIVE_INT.fieldOf("count").orElse(1).forGetter(ItemStack::getCount),
-                            DataComponentPatch.CODEC.optionalFieldOf("components", DataComponentPatch.EMPTY).forGetter(ItemStack::getComponentsPatch)
-                    ).apply(instance, ItemStack::new)
-            )
-    )).xmap(opt -> opt.orElse(ItemStack.EMPTY), stack -> stack.isEmpty() ? Optional.empty() : Optional.of(stack));
+                            SAFE_COMPONENT_PATCH_CODEC.optionalFieldOf("components", DataComponentPatch.EMPTY).forGetter(ItemStack::getComponentsPatch)
+                    ).apply(instance, (Holder<Item> itemHolder, Integer count, DataComponentPatch patch) -> {
+                        ItemStack stack = new ItemStack(itemHolder, count);
+                        stack.applyComponents(patch);
+                        return stack;
+                    })
+            ))
+    ).xmap(
+            opt -> opt.orElse(ItemStack.EMPTY),
+            stack -> stack.isEmpty() ? Optional.empty() : Optional.of(stack)
+    );
 
     /**
      * Short form block pos codec
@@ -69,7 +99,12 @@ public class ModCodecs {
                     DataComponentPatch.CODEC.fieldOf("patch").codec()
             ),
             BuiltInRegistries.ITEM.byNameCodec()
-    ).xmap(ModCodecs::decodeEitherItemStack, stack -> !stack.getComponentsPatch().isEmpty() ? Either.left(Pair.of(stack.getItem(), stack.getComponentsPatch())) : Either.right(stack.getItem()));
+    ).xmap(
+            ModCodecs::decodeEitherItemStack,
+            stack -> !stack.getComponentsPatch().isEmpty()
+                    ? Either.left(Pair.of(stack.getItem(), stack.getComponentsPatch()))
+                    : Either.right(stack.getItem())
+    );
 
     private static ItemStack decodeEitherItemStack(Either<Pair<Item, DataComponentPatch>, Item> either) {
         if (either.left().isPresent()) {

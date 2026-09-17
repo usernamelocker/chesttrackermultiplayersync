@@ -6,7 +6,6 @@ import com.mojang.math.Axis;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
-import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -28,11 +27,13 @@ import red.jackf.whereisit.config.WhereIsItConfig;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
 public class NameRenderer {
     private static final Minecraft MC = Minecraft.getInstance();
+    private static final int FULL_BRIGHT = 0x00F000F0;
     private static final List<ScheduledLabel> scheduledLabels = new ArrayList<>();
 
     private record ScheduledLabel(Vec3 position, Component text, boolean focused) {}
@@ -72,7 +73,7 @@ public class NameRenderer {
                 if (alreadyRendering.contains(entry.getKey())) continue;
                 if (entry.getKey().distToCenterSqr(MC.player.position()) < maxRangeSq) {
                     Component name = entry.getValue().renderName();
-                    if (name != null) {
+                    if (name != null && !isBlockedLabel(name)) {
                         Vec3 pos = entry.getValue().getCenterPosition().add(0, 1, 0);
                         scheduledLabels.add(new ScheduledLabel(pos, name, false));
                     }
@@ -82,11 +83,32 @@ public class NameRenderer {
 
         if (focused != null) {
             Component name = focused.renderName();
-            if (name != null) {
+            if (name != null && !isBlockedLabel(name)) {
                 Vec3 pos = focused.getCenterPosition().add(0, 1, 0);
                 scheduledLabels.add(new ScheduledLabel(pos, name, true));
             }
         }
+    }
+
+    private static boolean isBlockedLabel(Component name) {
+        String normalizedName = normalizeLabelText(name.getString());
+        if (normalizedName.isEmpty()) return false;
+
+        List<String> blocked = WhereIsItConfig.INSTANCE.instance().getClient().blockedContainerLabelNames;
+        if (blocked == null || blocked.isEmpty()) return false;
+
+        for (String blockedName : blocked) {
+            if (normalizedName.equals(normalizeLabelText(blockedName))) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static String normalizeLabelText(@Nullable String value) {
+        if (value == null) return "";
+        return value.trim().toLowerCase(Locale.ROOT);
     }
 
     public static boolean hasScheduledLabels() {
@@ -138,14 +160,14 @@ public class NameRenderer {
         // Background
         VertexConsumer bgBuffer = consumers.getBuffer(WhereIsItPipelines.TEXT_BACKGROUND_NO_DEPTH);
         int bgColour = ((int)(MC.options.getBackgroundOpacity(0.25F) * 255F)) << 24;
-        bgBuffer.addVertex(matrix, x - 1, -1f, 0).setColor(bgColour).setLight(LightTexture.FULL_BRIGHT);
-        bgBuffer.addVertex(matrix, x - 1, 10f, 0).setColor(bgColour).setLight(LightTexture.FULL_BRIGHT);
-        bgBuffer.addVertex(matrix, x + width, 10f, 0).setColor(bgColour).setLight(LightTexture.FULL_BRIGHT);
-        bgBuffer.addVertex(matrix, x + width, -1f, 0).setColor(bgColour).setLight(LightTexture.FULL_BRIGHT);
+        bgBuffer.addVertex(matrix, x - 1, -1f, 0).setColor(bgColour).setLight(FULL_BRIGHT);
+        bgBuffer.addVertex(matrix, x - 1, 10f, 0).setColor(bgColour).setLight(FULL_BRIGHT);
+        bgBuffer.addVertex(matrix, x + width, 10f, 0).setColor(bgColour).setLight(FULL_BRIGHT);
+        bgBuffer.addVertex(matrix, x + width, -1f, 0).setColor(bgColour).setLight(FULL_BRIGHT);
 
         // Text
         font.drawInBatch(label.text, x, 0, 0xFFFFFFFF, false, matrix, consumers,
-                Font.DisplayMode.SEE_THROUGH, 0, LightTexture.FULL_BRIGHT);
+                Font.DisplayMode.SEE_THROUGH, 0, FULL_BRIGHT);
 
         pose.popPose();
     }
