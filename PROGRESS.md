@@ -1,4 +1,11 @@
-# Progress (updated 2026-09-15)
+# Progress (updated 2026-09-17)
+
+## Builds
+
+* 1.21.11: prereleases 1-6 on `main` (`mod/`), latest `cmsync-1.21.11-6`.
+* 26.1.2: branch `26.1.2` (ponuing base 2.8.4 + same overlay, 3 API adaptations),
+  [prerelease cmsync-26.1.2-1](https://github.com/usernamelocker/chesttrackermultiplayersync/releases/tag/cmsync-26.1.2-1).
+  Needs Java 25 + Fabric API + YACL on 26.1.2. Same VPS serves both versions.
 
 ## Done
 
