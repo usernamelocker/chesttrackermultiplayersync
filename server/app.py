@@ -175,6 +175,30 @@ def pull(serverId: str = Query(...), since: str | None = Query(default=None),
                 "changes": changes, "tombstones": tombs,
                 "containers": sum(len(v) for v in state.values())}
 
+@app.get("/api/pullWebPage")
+def pull(serverId: str = Query(...), since: str | None = Query(default=None),
+         playerUuid: str = Query(...),
+         x_cmsync_token: str | None = Header(default=None, alias="X-CMSync-Token")):
+    sid = config.canonical_server_id(serverId)
+    if config.EXPECTED_SERVER_ID and sid != config.EXPECTED_SERVER_ID:
+        return {"status": "ACCESS_DENIED", "reason": "wrong serverId"}
+    denied = _gate(playerUuid, x_cmsync_token)
+    if denied:
+        return denied
+    with _con() as con:
+        state = db.full_state(con, sid)
+        changes = []
+        for key, positions in state.items():
+            for pos, mem in positions.items():
+                if since and mem.get("updatedAt", "") <= since:
+                    continue
+                changes.append({"key": key, "pos": pos, "deleted": False, **mem})
+        tombs = [dict(r) for r in con.execute(
+            "SELECT key,deleted_at FROM tombstones WHERE server_id=?", (sid,))]
+        return {"status": "SYNCED", "serverTime": time.time(), "cursor": since or "",
+                "changes": changes, "tombstones": tombs,
+                "containers": sum(len(v) for v in state.values())}
+
 @app.get("/api/view/{server_id:path}")
 def view(server_id: str):
     """Website/Discord read model: aggregated counts from normalized items."""
