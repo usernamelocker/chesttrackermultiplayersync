@@ -192,9 +192,9 @@ def pull(serverId: str = Query(...), since: str | None = Query(default=None),
                     continue
                 changes.append({"key": key, "pos": pos, "deleted": False, **mem})
         tombs = [dict(r) for r in con.execute(
-            "SELECT key,deleted_at FROM tombstones WHERE server_id=?", (sid,))]
+            "SELECT key,pos,deleted_at FROM tombstones WHERE server_id=?", (sid,))]
         return {"status": "SYNCED", "serverTime": time.time(), "cursor": since or "",
-                "changes": changes, "tombstones": tombs,
+                "changes": changes, "tombstones": tombs, "owners": db.get_owners(con, sid),
                 "containers": sum(len(v) for v in state.values())}
 
 @app.get("/api/view/{server_id:path}")

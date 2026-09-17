@@ -184,4 +184,14 @@ assert ("minecraft:overworld", "9000,64,9000") in got, got  # legacy: no pos, no
 assert ("minecraft:the_nether", "100,64,100") in got, got
 print("range gate ok")
 
+# --- pullWebPage: ungated full pull for the website (coords included by design) ---
+r = c.get("/api/pullWebPage", params={"serverId": CANON, "playerUuid": STRANGER}, headers=TOK).json()
+assert r["status"] == "SYNCED", r
+got = {(x["key"], x["pos"]) for x in r["changes"]}
+assert ("minecraft:overworld", "9000,64,9000") in got, got
+assert ("minecraft:the_nether", "100,64,100") in got, got
+assert all("pos" in t for t in r["tombstones"]), r["tombstones"]
+assert EUUID in r.get("owners", {}), r.get("owners")
+print("pullWebPage ok")
+
 print("ALL API TESTS PASSED")
