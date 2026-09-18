@@ -271,6 +271,7 @@ public class EditMemoryBankScreen extends BaseUtilScreen {
             selectorOptions.put(SettingsTab.MANAGE, translatable("chesttracker.gui.editMemoryBank.manage"));
         selectorOptions.put(SettingsTab.SEARCH, translatable("chesttracker.gui.editMemoryBank.search"));
         selectorOptions.put(SettingsTab.CMSYNC, translatable("chesttracker.gui.editMemoryBank.cmsync"));
+        selectorOptions.put(SettingsTab.CMSETTINGS, translatable("chesttracker.gui.editMemoryBank.cmsettings"));
         selectorOptions.put(SettingsTab.EMPTY, CommonComponents.EMPTY);
 
         settingsTabSelector.setOptions(selectorOptions);
@@ -281,6 +282,7 @@ public class EditMemoryBankScreen extends BaseUtilScreen {
         if (isCurrentLoaded) setupManagementSettings();
         setupSearchSettings();
         setupCMSyncSettings();
+        setupCMSettingsSettings();
 
         addSetting(new StringWidget(getSettingsX(0),
                                     getSettingsY(0),
@@ -761,19 +763,37 @@ public class EditMemoryBankScreen extends BaseUtilScreen {
                                .bounds(getSettingsX(1), getSettingsY(4), getSettingsWidth(1), BUTTON_HEIGHT)
                                .build();
         addSetting(stopButton, SettingsTab.CMSYNC);
+    }
 
-        // row 5: sync interval
+    ////////////////
+    // CMSETTINGS //
+    ////////////////
+    // Advanced sync settings: interval, ender chest toggle, container names, chat notifications
+
+    private void setupCMSettingsSettings() {
+        var font = Minecraft.getInstance().font;
+        CMSyncSettings settings = CMSyncSettings.load(this.memoryBank.id());
+
+        // row 0: section header
+        addSetting(new StringWidget(getSettingsX(0),
+                                    getSettingsY(0),
+                                    getSettingsWidth(2),
+                                    BUTTON_HEIGHT,
+                                    translatable("chesttracker.gui.editMemoryBank.cmsettings.desc"),
+                                    font), SettingsTab.CMSETTINGS);
+
+        // row 1: sync interval
         var intervalLabel = new StringWidget(getSettingsX(0),
-                                             getSettingsY(5),
+                                             getSettingsY(1),
                                              getSettingsWidth(1),
                                              BUTTON_HEIGHT,
                                              translatable("chesttracker.gui.editMemoryBank.cmsync.interval"),
                                              font);
-        addSetting(intervalLabel, SettingsTab.CMSYNC);
+        addSetting(intervalLabel, SettingsTab.CMSETTINGS);
 
         var intervalBox = new CustomEditBox(font,
                                             getSettingsX(1),
-                                            getSettingsY(5),
+                                            getSettingsY(1),
                                             getSettingsWidth(1),
                                             BUTTON_HEIGHT,
                                             null,
@@ -793,9 +813,9 @@ public class EditMemoryBankScreen extends BaseUtilScreen {
             } catch (NumberFormatException ignored) {
             }
         });
-        addSetting(intervalBox, SettingsTab.CMSYNC);
+        addSetting(intervalBox, SettingsTab.CMSETTINGS);
 
-        // row 6: sync ender chest
+        // row 2: sync ender chest
         var syncEnderButton = Button.builder(
                 settings.syncEnderChest
                         ? translatable("gui.enabled")
@@ -809,11 +829,11 @@ public class EditMemoryBankScreen extends BaseUtilScreen {
                             : translatable("gui.disabled"));
                 })
                 .tooltip(Tooltip.create(translatable("chesttracker.gui.editMemoryBank.cmsync.syncEnder.tooltip")))
-                .bounds(getSettingsX(0), getSettingsY(6), getSettingsWidth(2), BUTTON_HEIGHT)
+                .bounds(getSettingsX(0), getSettingsY(2), getSettingsWidth(2), BUTTON_HEIGHT)
                 .build();
-        addSetting(syncEnderButton, SettingsTab.CMSYNC);
+        addSetting(syncEnderButton, SettingsTab.CMSETTINGS);
 
-        // row 7: sync container names
+        // row 3: sync container names
         var syncNamesButton = Button.builder(
                 settings.syncContainerNames
                         ? translatable("gui.enabled")
@@ -827,11 +847,11 @@ public class EditMemoryBankScreen extends BaseUtilScreen {
                             : translatable("gui.disabled"));
                 })
                 .tooltip(Tooltip.create(translatable("chesttracker.gui.editMemoryBank.cmsync.syncNames.tooltip")))
-                .bounds(getSettingsX(0), getSettingsY(7), getSettingsWidth(2), BUTTON_HEIGHT)
+                .bounds(getSettingsX(0), getSettingsY(3), getSettingsWidth(2), BUTTON_HEIGHT)
                 .build();
-        addSetting(syncNamesButton, SettingsTab.CMSYNC);
+        addSetting(syncNamesButton, SettingsTab.CMSETTINGS);
 
-        // row 8: chat notifications
+        // row 4: chat notifications
         var chatNotifButton = Button.builder(
                 settings.chatNotifications
                         ? translatable("gui.enabled")
@@ -845,9 +865,9 @@ public class EditMemoryBankScreen extends BaseUtilScreen {
                             : translatable("gui.disabled"));
                 })
                 .tooltip(Tooltip.create(translatable("chesttracker.gui.editMemoryBank.cmsync.chatNotifications.tooltip")))
-                .bounds(getSettingsX(0), getSettingsY(8), getSettingsWidth(2), BUTTON_HEIGHT)
+                .bounds(getSettingsX(0), getSettingsY(4), getSettingsWidth(2), BUTTON_HEIGHT)
                 .build();
-        addSetting(chatNotifButton, SettingsTab.CMSYNC);
+        addSetting(chatNotifButton, SettingsTab.CMSETTINGS);
     }
 
     private Component cmsyncStateText(CMSyncSettings settings) {
@@ -1081,6 +1101,7 @@ public class EditMemoryBankScreen extends BaseUtilScreen {
         MANAGE,
         SEARCH,
         CMSYNC,
+        CMSETTINGS,
         EMPTY
     }
 }
