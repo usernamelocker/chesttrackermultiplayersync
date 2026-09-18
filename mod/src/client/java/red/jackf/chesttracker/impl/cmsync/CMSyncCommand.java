@@ -48,8 +48,7 @@ public class CMSyncCommand {
         }
     }
 
-    private static CMSyncHttp.Identity wipeIdentity(FabricClientCommandSource source,
-                                                    red.jackf.jackfredlib.client.api.gps.Coordinate coord) {
+    private static CMSyncHttp.Identity wipeIdentity(FabricClientCommandSource source, Coordinate coord) {
         return new CMSyncHttp.Identity(source.getPlayer().getUUID().toString(),
                 source.getPlayer().getName().getString(),
                 coord.id(), coord.userFriendlyName(),

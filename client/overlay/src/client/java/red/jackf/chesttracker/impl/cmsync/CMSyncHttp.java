@@ -39,7 +39,11 @@ public class CMSyncHttp {
     public enum Result {
         SYNCED, ACCESS_DENIED, QUARANTINED, URL_NOT_FOUND, NOT_A_CMSYNC_SERVER, CONNECTION_FAILED,
         /** Server rejected the body shape (HTTP 422). Deterministic: retrying won't help. */
-        VALIDATION_ERROR
+        VALIDATION_ERROR,
+        /** /api/wipe succeeded — server data is zero, generation bumped. */
+        WIPED,
+        /** /api/wipe step 1 answered — confirm within 60s with the challenge. */
+        CONFIRM_REQUIRED
     }
 
     public record Identity(String playerUuid, String playerName, String serverId, String serverName,
@@ -60,8 +64,15 @@ public class CMSyncHttp {
     public record PushOutcome(Result result, String note, int containers, int statusCode, long tookMs) {
     }
 
+    public record HandshakeOutcome(Result result, int generation) {
+    }
+
+    public record WipeOutcome(Result result, String detail, int generation, int containers,
+                              @Nullable String challenge) {
+    }
+
     public record PullOutcome(Result result, List<JsonObject> changes, List<JsonObject> tombstones,
-                                int containers, Map<String, String> owners) {
+                                int containers, Map<String, String> owners, int generation) {
     }
 
     private CMSyncHttp() {
@@ -94,13 +105,23 @@ public class CMSyncHttp {
         return rb;
     }
 
-    public static CompletableFuture<Result> handshake(String baseUrl, String token, Identity ident) {
+    public static CompletableFuture<HandshakeOutcome> handshake(String baseUrl, String token, Identity ident) {
         HttpRequest req = base(baseUrl, "/api/handshake", token)
                 .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(ident.toJson()), StandardCharsets.UTF_8))
                 .build();
         return CLIENT.sendAsync(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
-                .thenApply(CMSyncHttp::classify)
-                .exceptionally(CMSyncHttp::classifyError);
+                .thenApply(resp -> {
+                    Result r = classify(resp);
+                    int generation = -1;
+                    try {
+                        JsonObject o = JsonParser.parseString(resp.body()).getAsJsonObject();
+                        if (o.has("generation") && !o.get("generation").isJsonNull())
+                            generation = o.get("generation").getAsInt();
+                    } catch (RuntimeException ignored) {
+                    }
+                    return new HandshakeOutcome(r, generation);
+                })
+                .exceptionally(t -> new HandshakeOutcome(classifyError(t), -1));
     }
 
     public static CompletableFuture<PushOutcome> push(String baseUrl, String token, Identity ident,
@@ -165,7 +186,7 @@ public class CMSyncHttp {
         return CLIENT.sendAsync(rb.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
                 .thenApply(resp -> {
                     Result r = classify(resp);
-                    if (r != Result.SYNCED) return new PullOutcome(r, List.of(), List.of(), -1, Map.of());
+                    if (r != Result.SYNCED) return new PullOutcome(r, List.of(), List.of(), -1, Map.of(), -1);
                     try {
                         JsonObject o = JsonParser.parseString(resp.body()).getAsJsonObject();
                         List<JsonObject> ch = new java.util.ArrayList<>();
@@ -173,6 +194,12 @@ public class CMSyncHttp {
                         if (o.has("changes")) o.getAsJsonArray("changes").forEach(e -> ch.add(e.getAsJsonObject()));
                         if (o.has("tombstones")) o.getAsJsonArray("tombstones").forEach(e -> tb.add(e.getAsJsonObject()));
                         int c = o.has("containers") ? o.get("containers").getAsInt() : -1;
+                        int generation = -1;
+                        try {
+                            if (o.has("generation") && !o.get("generation").isJsonNull())
+                                generation = o.get("generation").getAsInt();
+                        } catch (RuntimeException ignored) {
+                        }
                         Map<String, String> owners = new HashMap<>();
                         if (o.has("owners") && o.get("owners").isJsonObject()) {
                             for (var e : o.getAsJsonObject("owners").entrySet()) {
@@ -182,12 +209,68 @@ public class CMSyncHttp {
                                 }
                             }
                         }
-                        return new PullOutcome(Result.SYNCED, ch, tb, c, owners);
+                        return new PullOutcome(Result.SYNCED, ch, tb, c, owners, generation);
                     } catch (RuntimeException e) {
-                        return new PullOutcome(Result.NOT_A_CMSYNC_SERVER, List.of(), List.of(), -1, Map.of());
+                        return new PullOutcome(Result.NOT_A_CMSYNC_SERVER, List.of(), List.of(), -1, Map.of(), -1);
                     }
                 })
-                .exceptionally(t -> new PullOutcome(classifyError(t), List.of(), List.of(), -1, Map.of()));
+                .exceptionally(t -> new PullOutcome(classifyError(t), List.of(), List.of(), -1, Map.of(), -1));
+    }
+
+    /**
+     * Wipe flow: call with confirm=false to get a challenge (+ container count),
+     * then confirm=true with that challenge to zero the server. Admin token required.
+     */
+    public static CompletableFuture<WipeOutcome> wipe(String baseUrl, String token, Identity ident,
+                                                      boolean confirm, @Nullable String challenge) {
+        JsonObject body = ident.toJson();
+        body.addProperty("confirm", confirm);
+        if (challenge != null) body.addProperty("challenge", challenge);
+        HttpRequest req = base(baseUrl, "/api/wipe", token)
+                .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(body), StandardCharsets.UTF_8))
+                .build();
+        return CLIENT.sendAsync(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
+                .thenApply(resp -> {
+                    int code = resp.statusCode();
+                    if (code == 401 || code == 403)
+                        return new WipeOutcome(Result.ACCESS_DENIED, "admin token required", -1, -1, null);
+                    try {
+                        JsonObject o = JsonParser.parseString(resp.body()).getAsJsonObject();
+                        String status = o.has("status") ? o.get("status").getAsString() : "";
+                        int generation = -1;
+                        int containers = -1;
+                        try {
+                            if (o.has("generation") && !o.get("generation").isJsonNull())
+                                generation = o.get("generation").getAsInt();
+                            if (o.has("containers") && !o.get("containers").isJsonNull())
+                                containers = o.get("containers").getAsInt();
+                        } catch (RuntimeException ignored) {
+                        }
+                        return switch (status.toUpperCase()) {
+                            case "WIPED" -> new WipeOutcome(Result.WIPED, detailOf(o), generation, containers, null);
+                            case "CONFIRM_REQUIRED" -> new WipeOutcome(Result.CONFIRM_REQUIRED,
+                                    detailOf(o), generation, containers,
+                                    o.has("challenge") && !o.get("challenge").isJsonNull()
+                                            ? o.get("challenge").getAsString() : null);
+                            case "ACCESS_DENIED" -> new WipeOutcome(Result.ACCESS_DENIED, detailOf(o), generation, containers, null);
+                            default -> new WipeOutcome(code == 422 ? Result.VALIDATION_ERROR : Result.CONNECTION_FAILED,
+                                    detailOf(o), generation, containers, null);
+                        };
+                    } catch (RuntimeException e) {
+                        return new WipeOutcome(classify(resp), "unreadable response", -1, -1, null);
+                    }
+                })
+                .exceptionally(t -> new WipeOutcome(classifyError(t),
+                        t.getMessage() != null ? t.getMessage() : "connection failed", -1, -1, null));
+    }
+
+    private static String detailOf(JsonObject o) {
+        try {
+            if (o.has("warning") && !o.get("warning").isJsonNull()) return o.get("warning").getAsString();
+            if (o.has("reason") && !o.get("reason").isJsonNull()) return o.get("reason").getAsString();
+        } catch (RuntimeException ignored) {
+        }
+        return "";
     }
 
     private static String uri(String s) {

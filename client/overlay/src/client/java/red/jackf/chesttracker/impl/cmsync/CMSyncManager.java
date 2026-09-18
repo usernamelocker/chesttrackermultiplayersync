@@ -46,7 +46,7 @@ import java.util.*;
  */
 public class CMSyncManager {
     public static final CMSyncManager INSTANCE = new CMSyncManager();
-    public static final String MOD_VERSION = "cmsync.4";
+    public static final String MOD_VERSION = "cmsync.5";
     private static final Logger LOGGER = ChestTracker.getLogger("CMSync");
 
     private static final double MAX_DELETE_FRACTION = 0.20;
@@ -66,6 +66,14 @@ public class CMSyncManager {
     // hiccup doesn't turn into a full-push-every-5s storm against a slow server
     private int consecutiveConnFails = 0;
     private long quietUntilMs = 0;
+    // last snapshot's key set, for delete propagation (broken/emptied containers).
+    // Null = needs a baseline (fresh session or filter toggle), never a mass delete.
+    @Nullable private Map<String, Set<String>> lastSnapshotKeys = null;
+    @Nullable private Boolean lastSyncEnder = null;
+    private boolean heldNotified = false;
+    private int heldStreak = 0;
+    @Nullable private String heldSignature = null;
+    private static final int HOLD_TICKS = 12; // ~1 min of identical warnings, then push through
 
     @Nullable private Instant lastSuccess = null;
     @Nullable private String lastResult = null;
@@ -126,6 +134,34 @@ public class CMSyncManager {
         return null;
     }
 
+    /**
+     * A newer server generation (wipe) clears this bank's locals so stale data can
+     * never resurrect — including for players who were offline during the wipe.
+     * Runs on the client thread (pull merge) or already-client command/menu threads.
+     *
+     * @return true if a wipe was applied (caller should skip normal merging)
+     */
+    public boolean applyServerGeneration(String bankId, int generation) {
+        if (generation < 0) return false;
+        CMSyncSettings s = CMSyncSettings.load(bankId);
+        if (generation <= s.generation) return false;
+        s.generation = generation;
+        s.save(bankId);
+        MemoryBankAccessImpl.INSTANCE.getLoadedInternal().ifPresent(bank -> {
+            if (!bank.getId().equals(bankId)) return;
+            for (Identifier k : new ArrayList<>(bank.getKeys())) bank.removeKey(k);
+            MemoryBankAccessImpl.INSTANCE.save();
+        });
+        this.lastPushHash = null;
+        this.lastSnapshotKeys = null;
+        this.lastPushedCount = -1;
+        this.heldStreak = 0;
+        this.heldSignature = null;
+        this.heldNotified = false;
+        this.lastResult = "wiped to generation " + generation;
+        return true;
+    }
+
     private void resetSession() {
         this.activeBankId = null;
         this.lastPushHash = null;
@@ -136,6 +172,11 @@ public class CMSyncManager {
         this.deterministicUntilMs = 0;
         this.consecutiveConnFails = 0;
         this.quietUntilMs = 0;
+        this.lastSnapshotKeys = null;
+        this.lastSyncEnder = null;
+        this.heldNotified = false;
+        this.heldStreak = 0;
+        this.heldSignature = null;
         this.lastSuccess = null;
         this.lastResult = null;
         this.lastDetail = null;
@@ -224,11 +265,32 @@ public class CMSyncManager {
             return;
         }
 
+        // ---- delete detection: present last snapshot, gone now (broken/emptied).
+        // Never fires on a fresh baseline, an empty bank (hub-wipe safety), or a
+        // filter-toggle tick — those re-baseline instead. Surviving deletes ride the
+        // next push as tombstones so the server (and teammates) forget them too.
+        List<String[]> deletedPairs = new ArrayList<>();
+        Map<String, Set<String>> curKeys = new HashMap<>();
+        for (RawEntry r : snapshot)
+            curKeys.computeIfAbsent(r.key(), k -> new HashSet<>()).add(r.pos());
+        if (lastSnapshotKeys != null && Objects.equals(lastSyncEnder, syncEnder)) {
+            for (var e : lastSnapshotKeys.entrySet()) {
+                Set<String> cur = curKeys.getOrDefault(e.getKey(), Set.of());
+                for (String pos : e.getValue()) {
+                    if (!cur.contains(pos)) deletedPairs.add(new String[]{e.getKey(), pos});
+                }
+            }
+        }
+        lastSnapshotKeys = curKeys;
+        lastSyncEnder = syncEnder;
+        final String deleteStamp = Instant.now().toString();
+
         // ---- everything heavy runs on queue lane ----
         CMSyncQueue.executor().execute(() -> {
             try {
                 runSyncJob(client, bankId, url, token, playerUuid, playerName,
-                        serverId, serverName, mcVersion, ops, snapshot, playerPos, dim);
+                        serverId, serverName, mcVersion, ops, snapshot, playerPos, dim,
+                        deletedPairs, deleteStamp);
             } finally {
                 CMSyncQueue.release();
             }
@@ -244,7 +306,8 @@ public class CMSyncManager {
     private void runSyncJob(Minecraft client, String bankId, String url, String token,
                             String playerUuid, String playerName, String serverId, String serverName,
                             String mcVersion, DynamicOps<JsonElement> ops, List<RawEntry> snapshot,
-                            BlockPos playerPos, String dim) {
+                            BlockPos playerPos, String dim,
+                            List<String[]> deletedPairs, String deleteStamp) {
         List<JsonObject> changes = new ArrayList<>(snapshot.size());
         List<JsonObject> hashProj = new ArrayList<>(snapshot.size());
         for (RawEntry r : snapshot) {
@@ -281,25 +344,63 @@ public class CMSyncManager {
             changes.add(ch);
             hashProj.add(ItemNormalizer.projection(r.key(), r.pos(), false, norm, r.ovName(), r.ovMode()));
         }
+        final int upsertCount = changes.size();
+
+        // append propagated deletes (broken/emptied since last snapshot)
+        for (String[] del : deletedPairs) {
+            JsonObject ch = new JsonObject();
+            ch.addProperty("key", del[0]);
+            ch.addProperty("pos", del[1]);
+            ch.addProperty("deleted", true);
+            ch.addProperty("updatedAt", deleteStamp);
+            ch.addProperty("updatedBy", playerUuid);
+            ch.addProperty("mcVersion", mcVersion);
+            ch.add("items", new com.google.gson.JsonArray());
+            changes.add(ch);
+            hashProj.add(ItemNormalizer.projection(del[0], del[1], true, List.of(), null,
+                    ManualMode.DEFAULT.name()));
+        }
         final String fullHash = ItemNormalizer.hashProjections(hashProj);
         final boolean emptyLocal = changes.isEmpty();
         final String prevHash = this.lastPushHash;
         final boolean dirty = this.failing || !fullHash.equals(prevHash);
 
-        // local mass-delete hold: propagate deletes, but not wipes
-        if (!emptyLocal && lastPushedCount > 0) {
-            int drop = lastPushedCount - changes.size();
-            if (drop >= MAX_DELETE_COUNT || drop >= (int) (lastPushedCount * MAX_DELETE_FRACTION)) {
-                client.execute(() -> {
-                    if (!bankId.equals(activeBankId)) return;
-                    lastResult = "held local mass-delete";
-                    sendChat(client, Component.literal("CMSync held push: you lost " + drop
-                            + " containers locally (last=" + lastPushedCount + " now=" + changes.size()
-                            + "). Re-open chests or /cmsync stop if intentional."), ChatFormatting.YELLOW);
-                });
-                // still pull so we don't go stale
-                doPullBlocking(client, bankId, url, token, playerUuid, serverId, playerName, serverName, mcVersion, playerPos, dim);
-                return;
+        // local mass-delete hold: warn first; a drop that stays identical for ~1 min
+        // pushes through (the user lived with the warning — e.g. legit reorganization).
+        // Empty banks never reach here (hub-wipe safety); server quarantine + snapshots
+        // backstop true accidents either way.
+        if (upsertCount > 0 && lastPushedCount > 0) {
+            int drop = lastPushedCount - upsertCount;
+            boolean mass = drop >= MAX_DELETE_COUNT
+                    || (lastPushedCount >= 10 && drop >= (int) (lastPushedCount * MAX_DELETE_FRACTION));
+            if (mass) {
+                if (!fullHash.equals(heldSignature)) {
+                    heldSignature = fullHash;
+                    heldStreak = 1;
+                    heldNotified = false;
+                } else {
+                    heldStreak++;
+                }
+                if (heldStreak < HOLD_TICKS) {
+                    final int fDrop = drop;
+                    final int fNow = upsertCount;
+                    client.execute(() -> {
+                        if (!bankId.equals(activeBankId)) return;
+                        lastResult = "held local mass-delete";
+                        if (!heldNotified) {
+                            heldNotified = true;
+                            sendChat(client, Component.literal("CMSync held push: you lost " + fDrop
+                                    + " containers locally (last=" + lastPushedCount + " now=" + fNow
+                                    + "). Pushing through shortly unless you /cmsync stop."), ChatFormatting.YELLOW);
+                        }
+                    });
+                    // still pull so we don't go stale
+                    doPullBlocking(client, bankId, url, token, playerUuid, serverId, playerName, serverName, mcVersion, playerPos, dim);
+                    return;
+                }
+                heldStreak = 0;
+                heldSignature = null;
+                heldNotified = false;
             }
         }
 
@@ -310,8 +411,8 @@ public class CMSyncManager {
             if (dirty && !emptyLocal) {
                 CMSyncHttp.PushOutcome push = CMSyncHttp.push(url, token, ident, prevHash, fullHash, changes).join();
                 if (push.tookMs() > 10_000) {
-                    LOGGER.warn("cmsync slow push: {} containers took {}ms (HTTP {})",
-                            changes.size(), push.tookMs(), push.statusCode());
+                    LOGGER.warn("cmsync slow push: {} containers + {} deletes took {}ms (HTTP {})",
+                            upsertCount, deletedPairs.size(), push.tookMs(), push.statusCode());
                 }
                 // deterministic rejections would fail identically on every retry —
                 // handle separately (one message + cooldown) instead of the flap loop
@@ -324,7 +425,7 @@ public class CMSyncManager {
                 }
                 client.execute(() -> handlePushResult(client, bankId, push.result(),
                         push.result() == CMSyncHttp.Result.SYNCED ? fullHash : prevHash,
-                        false, push.note(), changes.size(), push.statusCode(), push.tookMs()));
+                        false, push.note(), upsertCount, push.statusCode(), push.tookMs()));
                 if (push.result() == CMSyncHttp.Result.QUARANTINED) {
                     doPullBlocking(client, bankId, url, token, playerUuid, serverId, playerName, serverName, mcVersion, playerPos, dim);
                     return;
@@ -360,7 +461,9 @@ public class CMSyncManager {
         client.execute(() -> {
             if (!bankId.equals(activeBankId)) return;
             if (f.result() == CMSyncHttp.Result.SYNCED) {
-                applyPull(client, bankId, f.changes(), f.tombstones(), playerUuid, mcVersion);
+                // wipe first: merging pulled data into about-to-be-cleared locals is pointless
+                if (!applyServerGeneration(bankId, f.generation()))
+                    applyPull(client, bankId, f.changes(), f.tombstones(), playerUuid, mcVersion);
                 if (!f.owners().isEmpty()) {
                     CMSyncSettings s = CMSyncSettings.load(bankId);
                     boolean changed = false;
