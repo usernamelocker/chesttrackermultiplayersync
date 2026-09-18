@@ -1,4 +1,11 @@
-# Progress (updated 2026-09-15)
+# Progress (updated 2026-09-17)
+
+## Builds
+
+* 1.21.11: prereleases 1-6 on `main` (`mod/`), latest `cmsync-1.21.11-6`.
+* 26.1.2: branch `26.1.2` (ponuing base 2.8.4 + same overlay, 3 API adaptations),
+  [prerelease cmsync-26.1.2-1](https://github.com/usernamelocker/chesttrackermultiplayersync/releases/tag/cmsync-26.1.2-1).
+  Needs Java 25 + Fabric API + YACL on 26.1.2. Same VPS serves both versions.
 
 ## Done
 
@@ -40,12 +47,19 @@
   relabeled Website; per-player ender chests (one icon + per-player profiles, own
   migration); server 5k range gate on pulls (+tombstones) with ender exemption;
   player-name owners for profiles. INSTALL THIS ONE (needs VPS redeploy too).
-* Native tab inside EditMemoryBankScreen (v1 uses standalone `/cmsync gui` screen instead — simpler, version-proof).
-* 26.1.2/26.2 branch builds (same overlay, see porting doc).
-* Live Portainer deploy (repo is on GitHub private; needs your 2 env vars + Deploy click).
+* Prerelease 7 (`cmsync-1.21.11-7`): ender dropdown with player-head profiles
+  (hover names, auto-close); quieter failures (5s-60s backoff, HTTP code + duration
+  in `/cmsync status`, slow-push warnings); timeouts 10s/30s. INSTALL THIS ONE.
+* Prerelease 8 (`cmsync-1.21.11-8`): broken/emptied chests propagate as tombstones
+  (no more resurrection); `/cmsync wipealldata` two-step admin wipe with wipe
+  generation (online clients cleared, offline cleared on return, snapshots kept).
+* Prerelease 9 (`cmsync-1.21.11-9`): mass breaks go straight through with one warning;
+  only an established bank reading completely empty holds (hub-wipe). Server quarantine
+  replaced by snapshot + warning log. INSTALL THIS ONE (needs VPS redeploy too).
+* Prerelease 10 (`cmsync-1.21.11-10`): single Sync tab (website tab + `/qmsync` gone);
+  Pause/Resume button (Stop forgets credentials, Pause keeps them). No VPS change.
 
-## Your 3 inputs needed to go live
+## Live state
 
-1. `/cmsync status` → exact `serverId` → Portainer env `EXPECTED_SERVER_ID`
-2. Friend UUIDs → Portainer env `WHITELIST_UUIDS`
-3. `http://VPS-IP:7000/health` → `{"ok":true}`, then connect from game
+* VPS: cmsync 2.3 expected (Update the `chest-tracker` stack after pushing).
+* 26.1.2 branch mirrors main's features (see `26.1.2` branch + `cmsync-26.1.2-*` releases).

@@ -31,8 +31,9 @@ can inject them instead of a `.env` file (which is gitignored — never commit i
 
 ## In-game
 
-`/cmsync gui` (URL + token boxes) or `/cmsync connect <url> <token>`,
-`/cmsync status`, `/cmsync stop`. Server setup: repo-root `server/START-HERE.md`.
+Memory Bank menu → Sync tab (URL + masked token → Connect, Pause/Resume, Stop),
+`/cmsync status`, `/cmsync stop`, `/cmsync wipealldata [confirm]`.
+Server setup: repo-root `server/START-HERE.md`.
 
 ## License
 

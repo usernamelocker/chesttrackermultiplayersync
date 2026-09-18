@@ -13,7 +13,7 @@ import java.time.Duration;
 import java.util.Optional;
 
 /**
- * /cmsync status | stop. Connecting happens in the Memory Bank menu (CMSync tab).
+ * /cmsync status | stop | wipealldata [confirm]. Connecting happens in the Memory Bank menu (CMSync tab).
  */
 public class CMSyncCommand {
     private CMSyncCommand() {
@@ -27,12 +27,105 @@ public class CMSyncCommand {
                                 .executes(ctx -> stop(ctx.getSource())))
                         .then(ClientCommandManager.literal("status")
                                 .executes(ctx -> status(ctx.getSource())))
+                        .then(ClientCommandManager.literal("wipealldata")
+                                .executes(ctx -> wipeStep1(ctx.getSource()))
+                                .then(ClientCommandManager.literal("confirm")
+                                        .executes(ctx -> wipeStep2(ctx.getSource()))))
         ));
     }
 
     private static int help(FabricClientCommandSource source) {
-        source.sendFeedback(Component.literal("CMSync: connect in the Memory Bank menu (CMSync tab) | /cmsync status | /cmsync stop")
+        source.sendFeedback(Component.literal("CMSync: connect in the Memory Bank menu (CMSync tab) | /cmsync status | /cmsync stop | /cmsync wipealldata")
                 .withStyle(ChatFormatting.GRAY));
+        return 1;
+    }
+
+    private static String gameVersion() {
+        try {
+            return net.minecraft.SharedConstants.getCurrentVersion().name();
+        } catch (Throwable t) {
+            return "unknown";
+        }
+    }
+
+    private static CMSyncHttp.Identity wipeIdentity(FabricClientCommandSource source, Coordinate coord) {
+        return new CMSyncHttp.Identity(source.getPlayer().getUUID().toString(),
+                source.getPlayer().getName().getString(),
+                coord.id(), coord.userFriendlyName(),
+                gameVersion(), CMSyncManager.MOD_VERSION);
+    }
+
+    private static int wipeStep1(FabricClientCommandSource source) {
+        Optional<MemoryBankImpl> bankOpt = MemoryBankAccessImpl.INSTANCE.getLoadedInternal();
+        Optional<Coordinate> coordOpt = Coordinate.getCurrent();
+        if (bankOpt.isEmpty() || coordOpt.isEmpty()) {
+            source.sendError(Component.literal("Join your server first"));
+            return 0;
+        }
+        CMSyncSettings s = CMSyncSettings.load(bankOpt.get().getId());
+        if (!s.isActive()) {
+            source.sendError(Component.literal("CMSync not active for this bank"));
+            return 0;
+        }
+        final String url = s.url;
+        final String token = s.token;
+        CMSyncHttp.Identity ident = wipeIdentity(source, coordOpt.get());
+        CMSyncHttp.wipe(url, token, ident, false, null).whenComplete((out, throwable) ->
+                source.getClient().execute(() -> {
+                    if (throwable != null || out.result() != CMSyncHttp.Result.CONFIRM_REQUIRED) {
+                        source.sendError(Component.literal("Wipe aborted: "
+                                + (throwable != null ? "connection failed" : out.result() + " " + out.detail())));
+                        return;
+                    }
+                    source.sendFeedback(Component.literal("!!! ABOUT TO WIPE THE SHARED DATABASE !!!")
+                            .withStyle(ChatFormatting.RED));
+                    source.sendFeedback(Component.literal("This deletes ALL stored item data for this server ("
+                            + out.containers() + " containers). Snapshots are kept as backup. "
+                            + "Every connected player's local data is cleared too.")
+                            .withStyle(ChatFormatting.YELLOW));
+                    source.sendFeedback(Component.literal("Type /cmsync wipealldata confirm within 60 seconds to do it.")
+                            .withStyle(ChatFormatting.GRAY));
+                }));
+        return 1;
+    }
+
+    private static int wipeStep2(FabricClientCommandSource source) {
+        Optional<MemoryBankImpl> bankOpt = MemoryBankAccessImpl.INSTANCE.getLoadedInternal();
+        Optional<Coordinate> coordOpt = Coordinate.getCurrent();
+        if (bankOpt.isEmpty() || coordOpt.isEmpty()) {
+            source.sendError(Component.literal("Join your server first"));
+            return 0;
+        }
+        CMSyncSettings s = CMSyncSettings.load(bankOpt.get().getId());
+        if (!s.isActive()) {
+            source.sendError(Component.literal("CMSync not active for this bank"));
+            return 0;
+        }
+        final String bankId = bankOpt.get().getId();
+        final String url = s.url;
+        final String token = s.token;
+        CMSyncHttp.Identity ident = wipeIdentity(source, coordOpt.get());
+        CMSyncHttp.wipe(url, token, ident, false, null).whenComplete((first, throwable) ->
+                source.getClient().execute(() -> {
+                    if (throwable != null || first.result() != CMSyncHttp.Result.CONFIRM_REQUIRED
+                            || first.challenge() == null) {
+                        source.sendError(Component.literal("Wipe aborted: "
+                                + (throwable != null ? "connection failed" : first.result())));
+                        return;
+                    }
+                    CMSyncHttp.wipe(url, token, ident, true, first.challenge()).whenComplete((out, throwable2) ->
+                            source.getClient().execute(() -> {
+                                if (throwable2 != null || out.result() != CMSyncHttp.Result.WIPED) {
+                                    source.sendError(Component.literal("Wipe failed: "
+                                            + (throwable2 != null ? "connection failed" : out.result())));
+                                    return;
+                                }
+                                CMSyncManager.INSTANCE.applyServerGeneration(bankId, out.generation());
+                                source.sendFeedback(Component.literal("Wiped shared data to zero (generation "
+                                        + out.generation() + "). Local data cleared; fresh start.")
+                                        .withStyle(ChatFormatting.GREEN));
+                            }));
+                }));
         return 1;
     }
 
@@ -78,6 +171,8 @@ public class CMSyncCommand {
                         + CMSyncManager.INSTANCE.getLastResult().orElse("?") + ")").withStyle(ChatFormatting.GREEN)),
                 () -> source.sendFeedback(Component.literal("never synced ("
                         + CMSyncManager.INSTANCE.getLastResult().orElse("-") + ")").withStyle(ChatFormatting.YELLOW)));
+        CMSyncManager.INSTANCE.getLastDetail().ifPresent(d ->
+                source.sendFeedback(Component.literal(d).withStyle(ChatFormatting.GRAY)));
         int containers = bank.getMemories().values().stream().mapToInt(k -> k.getMemories().size()).sum();
         source.sendFeedback(Component.literal("local containers: " + containers + " in "
                 + bank.getMemories().size() + " keys").withStyle(ChatFormatting.GRAY));

@@ -46,11 +46,13 @@ import java.util.*;
  */
 public class CMSyncManager {
     public static final CMSyncManager INSTANCE = new CMSyncManager();
-    public static final String MOD_VERSION = "cmsync.3";
+    public static final String MOD_VERSION = "cmsync.6";
     private static final Logger LOGGER = ChestTracker.getLogger("CMSync");
 
-    private static final double MAX_DELETE_FRACTION = 0.20;
-    private static final int MAX_DELETE_COUNT = 50;
+    // Only an established bank reading completely empty is held (hub-wipe safety,
+    // needs 10+ previously pushed containers). Everything else pushes through;
+    // the server snapshots + logs mass deletes as backstop.
+    private static final int EMPTY_HOLD_MIN_BANK = 10;
 
     @Nullable private String activeBankId = null;
     @Nullable private String lastPushHash = null;
@@ -62,9 +64,20 @@ public class CMSyncManager {
     @Nullable private String deterministicNote = null;
     private long deterministicUntilMs = 0;
     private static final long DETERMINISTIC_COOLDOWN_MS = 5 * 60 * 1000L;
+    // consecutive transport failures back off quietly (5s doubling to 60s) so one
+    // hiccup doesn't turn into a full-push-every-5s storm against a slow server
+    private int consecutiveConnFails = 0;
+    private long quietUntilMs = 0;
+    // last snapshot's key set, for delete propagation (broken/emptied containers).
+    // Null = needs a baseline (fresh session or filter toggle), never a mass delete.
+    @Nullable private Map<String, Set<String>> lastSnapshotKeys = null;
+    @Nullable private Boolean lastSyncEnder = null;
+    private boolean emptyHoldNotified = false;
+    @Nullable private String lastWarnedDeletes = null;
 
     @Nullable private Instant lastSuccess = null;
     @Nullable private String lastResult = null;
+    @Nullable private String lastDetail = null;
 
     private CMSyncManager() {
     }
@@ -95,6 +108,11 @@ public class CMSyncManager {
         return Optional.ofNullable(lastResult);
     }
 
+    /** Free-text detail of the last push attempt (HTTP code, duration, sizes). */
+    public Optional<String> getLastDetail() {
+        return Optional.ofNullable(lastDetail);
+    }
+
     /** Teammate uuids -> last seen names for ender chest profiles (sidecar cache + live player). */
     public Map<UUID, String> getOwnerNames(String bankId) {
         Map<UUID, String> out = new HashMap<>();
@@ -116,6 +134,33 @@ public class CMSyncManager {
         return null;
     }
 
+    /**
+     * A newer server generation (wipe) clears this bank's locals so stale data can
+     * never resurrect — including for players who were offline during the wipe.
+     * Runs on the client thread (pull merge) or already-client command/menu threads.
+     *
+     * @return true if a wipe was applied (caller should skip normal merging)
+     */
+    public boolean applyServerGeneration(String bankId, int generation) {
+        if (generation < 0) return false;
+        CMSyncSettings s = CMSyncSettings.load(bankId);
+        if (generation <= s.generation) return false;
+        s.generation = generation;
+        s.save(bankId);
+        MemoryBankAccessImpl.INSTANCE.getLoadedInternal().ifPresent(bank -> {
+            if (!bank.getId().equals(bankId)) return;
+            for (Identifier k : new ArrayList<>(bank.getKeys())) bank.removeKey(k);
+            MemoryBankAccessImpl.INSTANCE.save();
+        });
+        this.lastPushHash = null;
+        this.lastSnapshotKeys = null;
+        this.lastPushedCount = -1;
+        this.emptyHoldNotified = false;
+        this.lastWarnedDeletes = null;
+        this.lastResult = "wiped to generation " + generation;
+        return true;
+    }
+
     private void resetSession() {
         this.activeBankId = null;
         this.lastPushHash = null;
@@ -124,8 +169,15 @@ public class CMSyncManager {
         this.lastAttemptMs = 0;
         this.deterministicNote = null;
         this.deterministicUntilMs = 0;
+        this.consecutiveConnFails = 0;
+        this.quietUntilMs = 0;
+        this.lastSnapshotKeys = null;
+        this.lastSyncEnder = null;
+        this.emptyHoldNotified = false;
+        this.lastWarnedDeletes = null;
         this.lastSuccess = null;
         this.lastResult = null;
+        this.lastDetail = null;
     }
 
     /** Client thread: fast guards + fast copy only. */
@@ -155,6 +207,8 @@ public class CMSyncManager {
         if (now - lastAttemptMs < Math.max(2, settings.intervalSeconds) * 1000L) return;
         // deterministic rejection cooling down: stay quiet, don't burn the lane
         if (now < deterministicUntilMs) return;
+        // backing off after transport failures: stay quiet, don't burn the lane
+        if (now < quietUntilMs) return;
         // queue lane: if network busy, skip this tick (coalesce) — keeps FPS smooth
         if (!CMSyncQueue.tryClaim()) return;
         lastAttemptMs = now;
@@ -209,11 +263,32 @@ public class CMSyncManager {
             return;
         }
 
+        // ---- delete detection: present last snapshot, gone now (broken/emptied).
+        // Never fires on a fresh baseline, an empty bank (hub-wipe safety), or a
+        // filter-toggle tick — those re-baseline instead. Surviving deletes ride the
+        // next push as tombstones so the server (and teammates) forget them too.
+        List<String[]> deletedPairs = new ArrayList<>();
+        Map<String, Set<String>> curKeys = new HashMap<>();
+        for (RawEntry r : snapshot)
+            curKeys.computeIfAbsent(r.key(), k -> new HashSet<>()).add(r.pos());
+        if (lastSnapshotKeys != null && Objects.equals(lastSyncEnder, syncEnder)) {
+            for (var e : lastSnapshotKeys.entrySet()) {
+                Set<String> cur = curKeys.getOrDefault(e.getKey(), Set.of());
+                for (String pos : e.getValue()) {
+                    if (!cur.contains(pos)) deletedPairs.add(new String[]{e.getKey(), pos});
+                }
+            }
+        }
+        lastSnapshotKeys = curKeys;
+        lastSyncEnder = syncEnder;
+        final String deleteStamp = Instant.now().toString();
+
         // ---- everything heavy runs on queue lane ----
         CMSyncQueue.executor().execute(() -> {
             try {
                 runSyncJob(client, bankId, url, token, playerUuid, playerName,
-                        serverId, serverName, mcVersion, ops, snapshot, playerPos, dim);
+                        serverId, serverName, mcVersion, ops, snapshot, playerPos, dim,
+                        deletedPairs, deleteStamp);
             } finally {
                 CMSyncQueue.release();
             }
@@ -229,7 +304,8 @@ public class CMSyncManager {
     private void runSyncJob(Minecraft client, String bankId, String url, String token,
                             String playerUuid, String playerName, String serverId, String serverName,
                             String mcVersion, DynamicOps<JsonElement> ops, List<RawEntry> snapshot,
-                            BlockPos playerPos, String dim) {
+                            BlockPos playerPos, String dim,
+                            List<String[]> deletedPairs, String deleteStamp) {
         List<JsonObject> changes = new ArrayList<>(snapshot.size());
         List<JsonObject> hashProj = new ArrayList<>(snapshot.size());
         for (RawEntry r : snapshot) {
@@ -266,26 +342,56 @@ public class CMSyncManager {
             changes.add(ch);
             hashProj.add(ItemNormalizer.projection(r.key(), r.pos(), false, norm, r.ovName(), r.ovMode()));
         }
+        final int upsertCount = changes.size();
+
+        // append propagated deletes (broken/emptied since last snapshot)
+        for (String[] del : deletedPairs) {
+            JsonObject ch = new JsonObject();
+            ch.addProperty("key", del[0]);
+            ch.addProperty("pos", del[1]);
+            ch.addProperty("deleted", true);
+            ch.addProperty("updatedAt", deleteStamp);
+            ch.addProperty("updatedBy", playerUuid);
+            ch.addProperty("mcVersion", mcVersion);
+            ch.add("items", new com.google.gson.JsonArray());
+            changes.add(ch);
+            hashProj.add(ItemNormalizer.projection(del[0], del[1], true, List.of(), null,
+                    ManualMode.DEFAULT.name()));
+        }
         final String fullHash = ItemNormalizer.hashProjections(hashProj);
         final boolean emptyLocal = changes.isEmpty();
         final String prevHash = this.lastPushHash;
         final boolean dirty = this.failing || !fullHash.equals(prevHash);
 
-        // local mass-delete hold: propagate deletes, but not wipes
-        if (!emptyLocal && lastPushedCount > 0) {
-            int drop = lastPushedCount - changes.size();
-            if (drop >= MAX_DELETE_COUNT || drop >= (int) (lastPushedCount * MAX_DELETE_FRACTION)) {
-                client.execute(() -> {
-                    if (!bankId.equals(activeBankId)) return;
-                    lastResult = "held local mass-delete";
-                    sendChat(client, Component.literal("CMSync held push: you lost " + drop
-                            + " containers locally (last=" + lastPushedCount + " now=" + changes.size()
-                            + "). Re-open chests or /cmsync stop if intentional."), ChatFormatting.YELLOW);
-                });
-                // still pull so we don't go stale
-                doPullBlocking(client, bankId, url, token, playerUuid, serverId, playerName, serverName, mcVersion, playerPos, dim);
-                return;
-            }
+        // hub-wipe hold: an established bank reading completely empty is never pushed —
+        // pull-only, so the team refills the view instead of a wipe propagating.
+        // (Tiny banks always propagate; a real fresh start uses /cmsync wipealldata.)
+        if (upsertCount == 0 && !deletedPairs.isEmpty() && lastPushedCount >= EMPTY_HOLD_MIN_BANK) {
+            client.execute(() -> {
+                if (!bankId.equals(activeBankId)) return;
+                lastResult = "held empty bank";
+                if (!emptyHoldNotified) {
+                    emptyHoldNotified = true;
+                    sendChat(client, Component.literal("CMSync holding: bank reads empty but had "
+                            + lastPushedCount + " containers — pull-only, nothing deleted. "
+                            + "To truly start over, use /cmsync wipealldata."), ChatFormatting.YELLOW);
+                }
+            });
+            doPullBlocking(client, bankId, url, token, playerUuid, serverId, playerName, serverName, mcVersion, playerPos, dim);
+            return;
+        }
+        emptyHoldNotified = false;
+
+        // everything else (including mass breaks) goes straight through with one warning
+        // per unique delete set; the server snapshots + logs mass deletes as backstop
+        if (!deletedPairs.isEmpty() && !fullHash.equals(lastWarnedDeletes)) {
+            lastWarnedDeletes = fullHash;
+            final int fGone = deletedPairs.size();
+            client.execute(() -> {
+                if (!bankId.equals(activeBankId)) return;
+                sendChat(client, Component.literal("CMSync syncing " + fGone
+                        + " removed container(s) to the team."), ChatFormatting.YELLOW);
+            });
         }
 
         CMSyncHttp.Identity ident = new CMSyncHttp.Identity(
@@ -294,6 +400,10 @@ public class CMSyncManager {
         try {
             if (dirty && !emptyLocal) {
                 CMSyncHttp.PushOutcome push = CMSyncHttp.push(url, token, ident, prevHash, fullHash, changes).join();
+                if (push.tookMs() > 10_000) {
+                    LOGGER.warn("cmsync slow push: {} containers + {} deletes took {}ms (HTTP {})",
+                            upsertCount, deletedPairs.size(), push.tookMs(), push.statusCode());
+                }
                 // deterministic rejections would fail identically on every retry —
                 // handle separately (one message + cooldown) instead of the flap loop
                 if (push.result() == CMSyncHttp.Result.VALIDATION_ERROR
@@ -305,7 +415,7 @@ public class CMSyncManager {
                 }
                 client.execute(() -> handlePushResult(client, bankId, push.result(),
                         push.result() == CMSyncHttp.Result.SYNCED ? fullHash : prevHash,
-                        false, push.note(), changes.size()));
+                        false, push.note(), upsertCount, push.statusCode(), push.tookMs()));
                 if (push.result() == CMSyncHttp.Result.QUARANTINED) {
                     doPullBlocking(client, bankId, url, token, playerUuid, serverId, playerName, serverName, mcVersion, playerPos, dim);
                     return;
@@ -320,7 +430,7 @@ public class CMSyncManager {
         } catch (RuntimeException ex) {
             LOGGER.error("cmsync job failed", ex);
             client.execute(() -> handlePushResult(client, bankId,
-                    CMSyncHttp.Result.CONNECTION_FAILED, prevHash, false, "", lastPushedCount));
+                    CMSyncHttp.Result.CONNECTION_FAILED, prevHash, false, "", lastPushedCount, -1, 0));
         }
     }
 
@@ -341,7 +451,9 @@ public class CMSyncManager {
         client.execute(() -> {
             if (!bankId.equals(activeBankId)) return;
             if (f.result() == CMSyncHttp.Result.SYNCED) {
-                applyPull(client, bankId, f.changes(), f.tombstones(), playerUuid, mcVersion);
+                // wipe first: merging pulled data into about-to-be-cleared locals is pointless
+                if (!applyServerGeneration(bankId, f.generation()))
+                    applyPull(client, bankId, f.changes(), f.tombstones(), playerUuid, mcVersion);
                 if (!f.owners().isEmpty()) {
                     CMSyncSettings s = CMSyncSettings.load(bankId);
                     boolean changed = false;
@@ -353,6 +465,8 @@ public class CMSyncManager {
                     }
                     if (changed) s.save(bankId);
                 }
+                consecutiveConnFails = 0;
+                quietUntilMs = 0;
                 lastSuccess = Instant.now();
                 lastResult = "synced";
                 if (failing) {
@@ -361,6 +475,11 @@ public class CMSyncManager {
                 }
             } else {
                 lastResult = f.result().name();
+                if (f.result() == CMSyncHttp.Result.CONNECTION_FAILED) {
+                    consecutiveConnFails++;
+                    quietUntilMs = System.currentTimeMillis()
+                            + Math.min(60_000L, 5_000L << Math.min(consecutiveConnFails - 1, 3));
+                }
                 if (!failing) {
                     failing = true;
                     sendChat(client, Component.literal("CMSync pull failed: " + f.result()), ChatFormatting.RED);
@@ -509,7 +628,10 @@ public class CMSyncManager {
     private void handleDeterministic(Minecraft client, String bankId, String note) {
         if (!bankId.equals(activeBankId)) return;
         this.failing = false;
+        this.consecutiveConnFails = 0;
+        this.quietUntilMs = 0;
         this.lastResult = "rejected: " + note;
+        this.lastDetail = note;
         if (!note.equals(deterministicNote)) {
             this.deterministicNote = note;
             sendChat(client, Component.literal("CMSync push rejected by server: " + note), ChatFormatting.RED);
@@ -520,8 +642,10 @@ public class CMSyncManager {
     }
 
     private void handlePushResult(Minecraft client, String bankId, CMSyncHttp.Result r,
-                                  @Nullable String hash, boolean skipped, String note, int pushedCount) {
+                                  @Nullable String hash, boolean skipped, String note, int pushedCount,
+                                  int statusCode, long tookMs) {
         if (!bankId.equals(activeBankId)) return;
+        this.lastDetail = pushDetail(r, statusCode, tookMs, pushedCount);
         if (r == CMSyncHttp.Result.SYNCED) {
             if (!skipped) {
                 lastPushHash = hash;
@@ -531,15 +655,27 @@ public class CMSyncManager {
             }
             deterministicNote = null;
             deterministicUntilMs = 0;
+            consecutiveConnFails = 0;
+            quietUntilMs = 0;
             if (failing) {
                 failing = false;
                 sendChat(client, Component.literal("CMSync re-established"), ChatFormatting.GREEN);
             }
         } else if (r == CMSyncHttp.Result.QUARANTINED) {
             lastResult = "quarantined";
+            consecutiveConnFails = 0;
+            quietUntilMs = 0;
             sendChat(client, Component.literal("CMSync held mass-delete: " + note), ChatFormatting.YELLOW);
         } else {
             lastResult = r.name();
+            if (r == CMSyncHttp.Result.CONNECTION_FAILED) {
+                consecutiveConnFails++;
+                quietUntilMs = System.currentTimeMillis()
+                        + Math.min(60_000L, 5_000L << Math.min(consecutiveConnFails - 1, 3));
+            } else {
+                consecutiveConnFails = 0;
+                quietUntilMs = 0;
+            }
             if (!failing) {
                 failing = true;
                 sendChat(client, Component.literal("CMSync push failed: " + r), ChatFormatting.RED);
@@ -547,9 +683,19 @@ public class CMSyncManager {
         }
     }
 
+    private static String pushDetail(CMSyncHttp.Result r, int statusCode, long tookMs, int pushedCount) {
+        if (r == CMSyncHttp.Result.SYNCED)
+            return "push HTTP " + statusCode + " in " + tookMs + "ms, " + pushedCount + " containers";
+        if (statusCode > 0) return "push HTTP " + statusCode + " (" + r + ")";
+        return "push failed: " + r + (tookMs > 0 ? " after " + tookMs + "ms" : "");
+    }
+
     private void handlePullError(Minecraft client, String bankId) {
         if (!bankId.equals(activeBankId)) return;
         lastResult = "connection failed";
+        consecutiveConnFails++;
+        quietUntilMs = System.currentTimeMillis()
+                + Math.min(60_000L, 5_000L << Math.min(consecutiveConnFails - 1, 3));
         if (!failing) {
             failing = true;
             sendChat(client, Component.literal("CMSync connection failed"), ChatFormatting.RED);

@@ -12,20 +12,21 @@ reference; `mod/src/.../impl/cmsync/` is what ships.
   Memory Bank menu (token box masked).
 * `impl/memory/EnderChestKeys.java` — per-player ender chest keys + migration.
 * Recording: ender chest + hypixel personal keys namespaced per player UUID.
-* `ChestTrackerScreen` — ender chest profiles (one icon + per-player buttons).
-* `EditMemoryBankScreen` — CMSync tab (URL/token/connect/stop); QMSync tab kept
-  for the website system, relabeled.
+* `ChestTrackerScreen` — ender chest dropdown with per-player head profiles.
+* `EditMemoryBankScreen` — single Sync tab (URL/masked token/connect/pause/stop);
+  website tab removed, `/qmsync` command deregistered.
 * `FilteringSettings.manualMode` defaults to false (auto-record).
 * `MemoryBankAccessImpl` — runs the ender chest migration on load.
 
 ## Configure in-game
 
 Memory Bank menu → CMSync tab (URL + token → Connect), `/cmsync status`,
-`/cmsync stop`. `serverId` for the server `.env` comes from `/cmsync status`.
+`/cmsync stop`, `/cmsync wipealldata [confirm]` (admin: zeroes the server).
 
 ## Safety behavior (matches server)
 
 * Only syncs on the bound `serverId` (hub joins ignored).
 * Empty local bank + non-empty server → push skipped, pull still runs (no hub-wipe).
-* Local mass-delete (>20% or >50) → push held, chat warning.
+* Broken/emptied containers propagate as tombstones (mass breaks go through with one
+  warning; an established bank reading empty holds pull-only — use wipe for fresh starts).
 * Deletes propagate as tombstones (30d TTL); pulls are range-gated (5k blocks).

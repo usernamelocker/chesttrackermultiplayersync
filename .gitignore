@@ -10,9 +10,11 @@ server/data/
 server/backups/
 .DS_Store
 Thumbs.db
-# mod build outputs (when overlay is copied into a full mod checkout)
+# mod build outputs (but keep vendored build inputs: libs + gradle wrapper)
 build/
 run/
 .gradle/
 out/
 *.jar
+!mod/libs/*.jar
+!mod/gradle/wrapper/gradle-wrapper.jar

@@ -30,6 +30,8 @@ public class CMSyncSettings {
     public boolean paused = false;
     public int intervalSeconds = DEFAULT_INTERVAL_SECONDS;
     public boolean syncEnderChest = true;
+    /** Last wipe generation seen from the server. A newer generation clears locals. */
+    public int generation = 0;
     /** Teammate uuid -> last seen name (for ender chest profiles). Refreshed on every pull. */
     public final Map<String, String> ownerNames = new HashMap<>();
 
@@ -72,6 +74,11 @@ public class CMSyncSettings {
             if (o.has("paused")) st.paused = o.get("paused").getAsBoolean();
             if (o.has("intervalSeconds")) st.intervalSeconds = o.get("intervalSeconds").getAsInt();
             if (o.has("syncEnderChest")) st.syncEnderChest = o.get("syncEnderChest").getAsBoolean();
+            try {
+                if (o.has("generation") && !o.get("generation").isJsonNull())
+                    st.generation = o.get("generation").getAsInt();
+            } catch (RuntimeException ignored) {
+            }
             if (o.has("ownerNames") && o.get("ownerNames").isJsonObject()) {
                 for (var e : o.getAsJsonObject("ownerNames").entrySet()) {
                     try {
@@ -97,6 +104,7 @@ public class CMSyncSettings {
             o.addProperty("paused", paused);
             o.addProperty("intervalSeconds", intervalSeconds);
             o.addProperty("syncEnderChest", syncEnderChest);
+            o.addProperty("generation", generation);
             JsonObject owners = new JsonObject();
             for (var e : ownerNames.entrySet()) owners.addProperty(e.getKey(), e.getValue());
             o.add("ownerNames", owners);

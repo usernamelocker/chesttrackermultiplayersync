@@ -150,6 +150,32 @@ def prune_tombstones(con: sqlite3.Connection, ttl_days: int = 30) -> int:
     return cur.rowcount
 
 
+def get_generation(con: sqlite3.Connection, server_id: str) -> int:
+    """Wipe generation: bumped on every wipe. Clients holding an older generation
+    clear their local banks on next contact (catches offline players too)."""
+    row = con.execute("SELECT v FROM meta WHERE k=?", (f"gen:{server_id}",)).fetchone()
+    try:
+        return int(row["v"]) if row else 0
+    except (ValueError, TypeError):
+        return 0
+
+
+def wipe_server(con: sqlite3.Connection, server_id: str, keep_snapshots: bool = True) -> dict:
+    """Delete memories, tombstones and owners; snapshot first; bump generation.
+    Snapshots are kept as the recovery path (pass keep_snapshots=False to nuke all)."""
+    snap_id = take_snapshot(con, server_id)
+    mem = con.execute("DELETE FROM memories WHERE server_id=?", (server_id,)).rowcount
+    tomb = con.execute("DELETE FROM tombstones WHERE server_id=?", (server_id,)).rowcount
+    own = con.execute("DELETE FROM key_owners WHERE server_id=?", (server_id,)).rowcount
+    if not keep_snapshots:
+        con.execute("DELETE FROM snapshots WHERE server_id=?", (server_id,))
+    con.execute("INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)",
+                (f"gen:{server_id}", str(get_generation(con, server_id) + 1)))
+    con.commit()
+    return {"memories": mem, "tombstones": tomb, "owners": own,
+            "snapshotId": snap_id, "generation": get_generation(con, server_id)}
+
+
 def record_owners(con: sqlite3.Connection, server_id: str, changes: list[dict],
                   identity_uuid: str | None, identity_name: str | None) -> int:
     """Remember uuid->name per ender-chest key (powers profile labels)."""
@@ -223,12 +249,11 @@ def select_pull(con: sqlite3.Connection, server_id: str, player_dim: str | None 
         tombs.append(dict(r))
     return changes, tombs
 
-def should_quarantine_mass_delete(existing: int, delete_count: int,
-                                  max_fraction: float = 0.20, max_count: int = 50,
-                                  min_bank: int = 10) -> bool:
-    """Guard: propagate deletes, but not mass wipes. Empty server never quarantines,
-    and tiny banks (< min_bank) are exempt from the fraction rule so a new player
-    breaking their only chests isn't flagged — the absolute count rule still applies."""
+def mass_delete_detected(existing: int, delete_count: int,
+                           max_fraction: float = 0.20, max_count: int = 50,
+                           min_bank: int = 10) -> bool:
+    """True for wipe-sized delete bursts. Advisory only: callers snapshot + log,
+    then apply anyway (tiny banks exempt from the fraction rule)."""
     if existing <= 0 or delete_count <= 0:
         return False
     if delete_count >= max_count:
@@ -236,6 +261,11 @@ def should_quarantine_mass_delete(existing: int, delete_count: int,
     if existing < min_bank:
         return False
     return (delete_count / max(1, existing)) >= max_fraction
+
+
+def should_quarantine_mass_delete(*args, **kwargs) -> bool:
+    """Backward-compat alias (the quarantine itself was removed)."""
+    return mass_delete_detected(*args, **kwargs)
 
 def is_empty_hash_push(full_hash: str, changes: list) -> bool:
     # Client sends sha256("[]")-style empty marker when it has nothing; server double-checks.

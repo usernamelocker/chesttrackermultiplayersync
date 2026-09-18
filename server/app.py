@@ -2,6 +2,7 @@
 from __future__ import annotations
 import hashlib
 import json
+import secrets
 import time
 from contextlib import contextmanager
 
@@ -17,7 +18,7 @@ import db
 from models import Change, HandshakeRequest, PushRequest
 
 app = FastAPI(title="CMSync", version="2.0.0")
-CMSYNC_SERVER = "2.1"  # bump on any server behavior change; visible in /health
+CMSYNC_SERVER = "2.3"  # bump on any server behavior change; visible in /health
 _log = logging.getLogger("cmsync")
 # Explicit handler: uvicorn's default config leaves the root logger handler-less,
 # so INFO records would silently vanish (only WARNING+ reaches stderr).
@@ -103,7 +104,8 @@ def handshake(req: HandshakeRequest, x_cmsync_token: str | None = Header(default
     denied = _gate(req.playerUuid, x_cmsync_token)
     if denied:
         return denied
-    return {"status": "SYNCED"}
+    with _con() as con:
+        return {"status": "SYNCED", "generation": db.get_generation(con, sid)}
 
 @app.post("/api/push")
 def push(req: PushRequest, x_cmsync_token: str | None = Header(default=None, alias="X-CMSync-Token")):
@@ -131,14 +133,14 @@ def push(req: PushRequest, x_cmsync_token: str | None = Header(default=None, ali
             return {"status": "SYNCED", "applied": 0, "skipped_stale": 0,
                     "note": "ignored empty push (possible hub-wipe)", "containers": existing}
 
-        # Mass-delete guard: quarantine, snapshot first, do not apply deletes.
-        if db.should_quarantine_mass_delete(existing, deletes,
+        # Mass deletes go straight through (with a pre-delete snapshot + warning log
+        # so accidents stay recoverable). Only fully-empty pushes are ignored (hub-wipe).
+        if deletes > 0 and db.mass_delete_detected(existing, deletes,
                                             config.MAX_DELETE_FRACTION, config.MAX_DELETE_COUNT,
                                             config.MIN_QUARANTINE_BANK):
             snap_id = db.take_snapshot(con, sid, config.SNAPSHOT_KEEP)
-            return JSONResponse({"status": "QUARANTINED",
-                                 "reason": f"mass delete: {deletes} deletes vs {existing} stored",
-                                 "snapshotId": snap_id, "containers": existing})
+            _log.warning("MASS DELETE %s: %s deletes vs %s stored by %s (snapshot %s)",
+                         sid, deletes, existing, req.playerUuid, snap_id)
 
         # v1-compat: full-snapshot posts arrive as PushRequest with many upserts; LWW handles them.
         res = db.apply_changes(con, sid, changes)
@@ -171,10 +173,11 @@ def pull(serverId: str = Query(...), since: str | None = Query(default=None),
         owners = db.get_owners(con, sid)
         return {"status": "SYNCED", "serverTime": time.time(), "cursor": since or "",
                 "changes": changes, "tombstones": tombs, "owners": owners,
+                "generation": db.get_generation(con, sid),
                 "containers": db.container_count(con, sid)}
 
 @app.get("/api/pullWebPage")
-def pull(serverId: str = Query(...), since: str | None = Query(default=None),
+def pullWebPage(serverId: str = Query(...), since: str | None = Query(default=None),
          playerUuid: str = Query(...),
          x_cmsync_token: str | None = Header(default=None, alias="X-CMSync-Token")):
     sid = config.canonical_server_id(serverId)
@@ -223,6 +226,39 @@ def restore(body: dict, x_cmsync_token: str | None = Header(default=None, alias=
     with _con() as con:
         n = db.restore_snapshot(con, config.canonical_server_id(body["serverId"]), int(body["snapshotId"]))
         return {"status": "SYNCED", "restored": n}
+
+
+# Two-step wipe: POST {confirm:false} -> challenge, then POST {confirm:true, challenge}.
+# Requires ADMIN_TOKEN (wipe stays disabled while it is empty). Snapshots are kept
+# as the recovery path; memories, tombstones and owners go to zero and the wipe
+# generation bumps so connected (and later returning) clients clear their locals too.
+_pending_wipes: dict[str, tuple[str, float]] = {}
+
+
+@app.post("/api/wipe")
+def wipe(body: dict, x_cmsync_token: str | None = Header(default=None, alias="X-CMSync-Token")):
+    if not config.ADMIN_TOKEN or x_cmsync_token != config.ADMIN_TOKEN:
+        raise HTTPException(401, "admin only")
+    sid = config.canonical_server_id(body.get("serverId", ""))
+    if config.EXPECTED_SERVER_ID and sid != config.EXPECTED_SERVER_ID:
+        return {"status": "ACCESS_DENIED", "reason": "wrong serverId"}
+    with _con() as con:
+        if not body.get("confirm"):
+            challenge = secrets.token_hex(16)
+            _pending_wipes[sid] = (challenge, time.time() + 60)
+            return {"status": "CONFIRM_REQUIRED", "challenge": challenge,
+                    "containers": db.container_count(con, sid),
+                    "warning": ("This deletes ALL stored item data for this server "
+                                "(memories, deletes, owners). Snapshots are kept.")}
+
+        pend = _pending_wipes.pop(sid, None)
+        if not pend or pend[0] != body.get("challenge") or time.time() > pend[1]:
+            return JSONResponse(status_code=400, content={"status": "BAD_CHALLENGE",
+                               "reason": "stale or wrong challenge; start over"})
+        result = db.wipe_server(con, sid)
+        result.update({"status": "WIPED"})
+        _log.warning("WIPE %s by %s: %s", sid, body.get("playerUuid"), result)
+        return result
 
 # v1 compat: QMSync POST /api/sync full snapshot -> diff into deltas is client-driven;
 # accept raw v1 payload here so old 1.21.11-only clients don't 404.
