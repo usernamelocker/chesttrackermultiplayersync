@@ -77,6 +77,8 @@ public class CMSyncManager {
     @Nullable private Instant lastSuccess = null;
     @Nullable private String lastResult = null;
     @Nullable private String lastDetail = null;
+    // throttle key for guard logging below: same stall logs once until a cycle runs
+    @Nullable private String lastTickNote = null;
 
     private CMSyncManager() {
     }
@@ -189,24 +191,50 @@ public class CMSyncManager {
         this.lastSuccess = null;
         this.lastResult = null;
         this.lastDetail = null;
+        this.lastTickNote = null;
+    }
+
+    /** Throttled guard logging: a stall logs once until a sync cycle dispatches. */
+    private void tickNote(String key, String msg) {
+        if (key.equals(lastTickNote)) return;
+        lastTickNote = key;
+        CMSyncLog.log("tick", msg);
     }
 
     /** Client thread: fast guards + fast copy only. */
     private void tick(Minecraft client) {
         Optional<MemoryBankImpl> bankOpt = MemoryBankAccessImpl.INSTANCE.getLoadedInternal();
         if (bankOpt.isEmpty() || client.player == null || client.level == null) {
-            if (activeBankId != null) resetSession();
+            if (activeBankId != null) {
+                resetSession();
+                tickNote("idle", "lost bank/player/level, session reset");
+            }
             return;
         }
         MemoryBankImpl bank = bankOpt.get();
         CMSyncSettings settings = CMSyncSettings.load(bank.getId());
         if (!settings.isActive()) {
-            if (activeBankId != null) resetSession();
+            if (activeBankId != null) {
+                resetSession();
+                tickNote("idle", "bank " + bank.getId() + " went inactive, session reset");
+            } else {
+                tickNote("inactive-" + bank.getId(), "bank " + bank.getId()
+                        + " not active (enabled=" + settings.enabled
+                        + " url=" + (settings.url != null)
+                        + " paused=" + settings.paused + ")");
+            }
             return;
         }
         Coordinate coord = Coordinate.getCurrent().orElse(null);
-        if (coord == null) return;
-        if (settings.boundServerId != null && !settings.boundServerId.equals(coord.id())) return;
+        if (coord == null) {
+            tickNote("nocoord-" + bank.getId(), "bank " + bank.getId() + " active but no coordinate");
+            return;
+        }
+        if (settings.boundServerId != null && !settings.boundServerId.equals(coord.id())) {
+            tickNote("bound-" + bank.getId(), "bank " + bank.getId() + " bound to " + settings.boundServerId
+                    + " but here " + coord.id() + " — sync held by binding");
+            return;
+        }
 
         if (!bank.getId().equals(activeBankId)) {
             resetSession();
@@ -254,6 +282,7 @@ public class CMSyncManager {
         // queue lane: if network busy, skip this tick (coalesce) — keeps FPS smooth
         if (!CMSyncQueue.tryClaim()) return;
         lastAttemptMs = now;
+        lastTickNote = null;
         lastSnapshotKeys = curKeys;
         lastSyncEnder = syncEnder;
         final String deleteStamp = Instant.now().toString();
