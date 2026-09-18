@@ -932,7 +932,11 @@ public class EditMemoryBankScreen extends BaseUtilScreen {
                             ? new CMSyncHttp.HandshakeOutcome(CMSyncHttp.Result.CONNECTION_FAILED, -1,
                             throwable.getMessage()) : handshake;
 
-                    CMSyncLog.log("connect", "url=" + parsed + " result=" + outcome.result()
+                    CMSyncLog.log("connect", "url=" + parsed
+                            + " exactId=" + coordinate.get().id()
+                            + " sid=" + CMSyncManager.canonicalWireId(coordinate.get().id())
+                            + " token=" + (tokenOrNull != null ? "yes" : "no")
+                            + " result=" + outcome.result()
                             + " gen=" + outcome.generation()
                             + (outcome.note().isEmpty() ? "" : " note=" + CMSyncLog.trunc(outcome.note(), 160)));
                     if (outcome.result() == CMSyncHttp.Result.SYNCED) {
