@@ -817,16 +817,12 @@ public class EditMemoryBankScreen extends BaseUtilScreen {
 
         // row 2: sync ender chest
         var syncEnderButton = Button.builder(
-                settings.syncEnderChest
-                        ? translatable("gui.enabled")
-                        : translatable("gui.disabled"),
+                toggleMessage("chesttracker.gui.editMemoryBank.cmsync.syncEnder", settings.syncEnderChest),
                 b -> {
                     CMSyncSettings ss = CMSyncSettings.load(this.memoryBank.id());
                     ss.syncEnderChest = !ss.syncEnderChest;
                     ss.save(this.memoryBank.id());
-                    b.setMessage(ss.syncEnderChest
-                            ? translatable("gui.enabled")
-                            : translatable("gui.disabled"));
+                    b.setMessage(toggleMessage("chesttracker.gui.editMemoryBank.cmsync.syncEnder", ss.syncEnderChest));
                 })
                 .tooltip(Tooltip.create(translatable("chesttracker.gui.editMemoryBank.cmsync.syncEnder.tooltip")))
                 .bounds(getSettingsX(0), getSettingsY(2), getSettingsWidth(2), BUTTON_HEIGHT)
@@ -835,16 +831,12 @@ public class EditMemoryBankScreen extends BaseUtilScreen {
 
         // row 3: sync container names
         var syncNamesButton = Button.builder(
-                settings.syncContainerNames
-                        ? translatable("gui.enabled")
-                        : translatable("gui.disabled"),
+                toggleMessage("chesttracker.gui.editMemoryBank.cmsync.syncNames", settings.syncContainerNames),
                 b -> {
                     CMSyncSettings ss = CMSyncSettings.load(this.memoryBank.id());
                     ss.syncContainerNames = !ss.syncContainerNames;
                     ss.save(this.memoryBank.id());
-                    b.setMessage(ss.syncContainerNames
-                            ? translatable("gui.enabled")
-                            : translatable("gui.disabled"));
+                    b.setMessage(toggleMessage("chesttracker.gui.editMemoryBank.cmsync.syncNames", ss.syncContainerNames));
                 })
                 .tooltip(Tooltip.create(translatable("chesttracker.gui.editMemoryBank.cmsync.syncNames.tooltip")))
                 .bounds(getSettingsX(0), getSettingsY(3), getSettingsWidth(2), BUTTON_HEIGHT)
@@ -853,21 +845,23 @@ public class EditMemoryBankScreen extends BaseUtilScreen {
 
         // row 4: chat notifications
         var chatNotifButton = Button.builder(
-                settings.chatNotifications
-                        ? translatable("gui.enabled")
-                        : translatable("gui.disabled"),
+                toggleMessage("chesttracker.gui.editMemoryBank.cmsync.chatNotifications", settings.chatNotifications),
                 b -> {
                     CMSyncSettings ss = CMSyncSettings.load(this.memoryBank.id());
                     ss.chatNotifications = !ss.chatNotifications;
                     ss.save(this.memoryBank.id());
-                    b.setMessage(ss.chatNotifications
-                            ? translatable("gui.enabled")
-                            : translatable("gui.disabled"));
+                    b.setMessage(toggleMessage("chesttracker.gui.editMemoryBank.cmsync.chatNotifications", ss.chatNotifications));
                 })
                 .tooltip(Tooltip.create(translatable("chesttracker.gui.editMemoryBank.cmsync.chatNotifications.tooltip")))
                 .bounds(getSettingsX(0), getSettingsY(4), getSettingsWidth(2), BUTTON_HEIGHT)
                 .build();
         addSetting(chatNotifButton, SettingsTab.CMSETTINGS);
+    }
+
+    /** "Label: Enabled/Disabled" for CMSETTINGS toggle buttons. */
+    private static Component toggleMessage(String labelKey, boolean on) {
+        return translatable(labelKey).append(": ")
+                .append(translatable(on ? "gui.enabled" : "gui.disabled"));
     }
 
     private Component cmsyncStateText(CMSyncSettings settings) {
