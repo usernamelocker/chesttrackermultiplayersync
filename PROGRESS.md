@@ -56,6 +56,8 @@
 * Prerelease 9 (`cmsync-1.21.11-9`): mass breaks go straight through with one warning;
   only an established bank reading completely empty holds (hub-wipe). Server quarantine
   replaced by snapshot + warning log. INSTALL THIS ONE (needs VPS redeploy too).
+* Prerelease 10 (`cmsync-1.21.11-10`): single Sync tab (website tab + `/qmsync` gone);
+  Pause/Resume button (Stop forgets credentials, Pause keeps them). No VPS change.
 
 ## Live state
 
