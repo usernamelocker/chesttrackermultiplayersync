@@ -105,6 +105,14 @@ Client merges into loaded `MemoryBankImpl` on client thread (see overlay `CMSync
   + keeps filesystem `.backup` via cron (`server/backup.py`).
 * `GET /api/snapshots?serverId=` lists `{id, createdAt, containers}`.
 * `POST /api/restore {serverId, snapshotId}` (admin token) restores.
+* `POST /api/wipe` (admin token, two-step): `{confirm:false}` → `{status:CONFIRM_REQUIRED,
+  challenge, containers, warning}`; then `{confirm:true, challenge}` within 60s →
+  `{status:WIPED, generation, snapshotId, cleared:{...}}`. Wipes memories, tombstones
+  and owners (snapshots kept, pre-wipe snapshot taken) and bumps the wipe `generation`.
+* `generation` rides on handshake/pull responses. Clients holding an older generation
+  clear their local banks on next contact — including players offline during the wipe.
+* Broken/emptied containers propagate as `deleted:true` changes (tombstones); the local
+  mass-delete hold and server quarantine guard wipe bursts.
 * `GET /health` → `{ok:true, time, containers}`.
 * `GET /api/view/{serverId}` → merged counts for website/Discord (no auth beyond token if configured).
 

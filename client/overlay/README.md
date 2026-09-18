@@ -21,7 +21,7 @@ reference; `mod/src/.../impl/cmsync/` is what ships.
 ## Configure in-game
 
 Memory Bank menu → CMSync tab (URL + token → Connect), `/cmsync status`,
-`/cmsync stop`. `serverId` for the server `.env` comes from `/cmsync status`.
+`/cmsync stop`, `/cmsync wipealldata [confirm]` (admin: zeroes the server).
 
 ## Safety behavior (matches server)
 

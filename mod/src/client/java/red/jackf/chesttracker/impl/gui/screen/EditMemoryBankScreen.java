@@ -1004,12 +1004,13 @@ public class EditMemoryBankScreen extends BaseUtilScreen {
                                                gameVersion(),
                                                CMSyncManager.MOD_VERSION);
 
-        CMSyncHttp.handshake(parsed.toString(), tokenOrNull, identity).whenComplete((result, throwable) ->
+        CMSyncHttp.handshake(parsed.toString(), tokenOrNull, identity).whenComplete((handshake, throwable) ->
                 Minecraft.getInstance().execute(() -> {
                     if (this.cmsyncConnectButton != null) this.cmsyncConnectButton.active = true;
-                    var outcome = throwable != null ? CMSyncHttp.Result.CONNECTION_FAILED : result;
+                    var outcome = throwable != null
+                            ? new CMSyncHttp.HandshakeOutcome(CMSyncHttp.Result.CONNECTION_FAILED, -1) : handshake;
 
-                    if (outcome == CMSyncHttp.Result.SYNCED) {
+                    if (outcome.result() == CMSyncHttp.Result.SYNCED) {
                         CMSyncSettings viewSettings = CMSyncSettings.load(bankId);
                         viewSettings.url = parsed.toString();
                         viewSettings.token = tokenOrNull;
@@ -1022,9 +1023,10 @@ public class EditMemoryBankScreen extends BaseUtilScreen {
                             CMSyncManager.INSTANCE.markActivated(bankId, coordinate.get().id());
                             MemoryBankAccessImpl.INSTANCE.save();
                         });
+                        CMSyncManager.INSTANCE.applyServerGeneration(bankId, outcome.generation());
                         refreshCMSyncStateLabel();
                     } else if (this.cmsyncStateLabel != null) {
-                        this.cmsyncStateLabel.setMessage((switch (outcome) {
+                        this.cmsyncStateLabel.setMessage((switch (outcome.result()) {
                             case ACCESS_DENIED -> translatable("chesttracker.qmsync.accessDenied");
                             default -> translatable("chesttracker.gui.editMemoryBank.cmsync.state.failed");
                         }).withStyle(ChatFormatting.RED));
