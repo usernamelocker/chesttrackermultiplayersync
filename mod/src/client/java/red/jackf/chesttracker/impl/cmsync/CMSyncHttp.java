@@ -159,14 +159,22 @@ public class CMSyncHttp {
                                 note = ("HTTP " + resp.statusCode() + ": " + loc + " " + msg).trim();
                                 if (note.length() > 180) note = note.substring(0, 180);
                             } catch (RuntimeException ignored) {
+                                System.out.println("Error in runtime exception 2:");
+                                ignored.printStackTrace();
                             }
                         }
                     } catch (RuntimeException ignored) {
+                        System.out.println("Error in runtime exception 2:");
+                        ignored.printStackTrace();
                     }
                     return new PushOutcome(r, note, containers, code, took);
                 })
-                .exceptionally(t -> new PushOutcome(classifyError(t), t.getMessage(), -1, -1,
-                        System.currentTimeMillis() - start));
+                .exceptionally(t -> {
+                    System.out.println("Error in exceptionally:");
+                    t.printStackTrace();
+                    new PushOutcome(classifyError(t), t.getMessage(), -1, -1,
+                            System.currentTimeMillis() - start);
+                });
     }
 
     public static CompletableFuture<PullOutcome> pull(String baseUrl, String token, String serverId, String playerUuid,
