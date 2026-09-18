@@ -255,14 +255,14 @@ public class CMSyncManager {
         final String token = settings.token;
         final String playerUuid = client.player.getUUID().toString();
         final String playerName = client.player.getName().getString();
-        final String serverId = coord.id();
-        System.out.println(serverId);
-        System.out.println(serverId);
-        System.out.println(serverId);
-        System.out.println(serverId);
-        System.out.println(serverId);
-        System.out.println(serverId);
-        System.out.println(serverId);
+        final String serverId = coord.id(); // TODO: get from the config file. or from the UI
+        CMSyncLog.log("system", "System Error: " + serverId);
+        CMSyncLog.log("system", "System Error: " + serverId);
+        CMSyncLog.log("system", "System Error: " + serverId);
+        CMSyncLog.log("system", "System Error: " + serverId);
+        CMSyncLog.log("system", "System Error: " + serverId);
+        CMSyncLog.log("system", "System Error: " + serverId);
+        CMSyncLog.log("system", "System Error: " + serverId);
         final String serverName = coord.userFriendlyName();
         final String mcVersion = gameVersion();
         final DynamicOps<JsonElement> ops =
