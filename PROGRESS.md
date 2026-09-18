@@ -47,6 +47,9 @@
   relabeled Website; per-player ender chests (one icon + per-player profiles, own
   migration); server 5k range gate on pulls (+tombstones) with ender exemption;
   player-name owners for profiles. INSTALL THIS ONE (needs VPS redeploy too).
+* Prerelease 7 (`cmsync-1.21.11-7`): ender dropdown with player-head profiles
+  (hover names, auto-close); quieter failures (5s-60s backoff, HTTP code + duration
+  in `/cmsync status`, slow-push warnings); timeouts 10s/30s. INSTALL THIS ONE.
 * Native tab inside EditMemoryBankScreen (v1 uses standalone `/cmsync gui` screen instead — simpler, version-proof).
 * 26.1.2/26.2 branch builds (same overlay, see porting doc).
 * Live Portainer deploy (repo is on GitHub private; needs your 2 env vars + Deploy click).

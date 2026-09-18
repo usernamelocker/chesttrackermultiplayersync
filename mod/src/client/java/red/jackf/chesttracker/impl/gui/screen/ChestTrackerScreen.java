@@ -77,14 +77,17 @@ public class ChestTrackerScreen extends Screen {
     private VerticalScrollWidget scroll;
     private Identifier currentMemoryKey;
     private List<ItemStack> items = Collections.emptyList();
-    // ender chest profiles (one shared icon + per-player buttons in a second column)
+    // ender chest profiles: one shared icon, dropdown rows of player heads below it
     @Nullable
     private ItemButton echestButton = null;
-    private final List<Button> profileButtons = new ArrayList<>();
+    private final List<EnderProfileButton> profileRows = new ArrayList<>();
     private final List<Profile> profiles = new ArrayList<>();
-    private boolean profilesExpanded = false;
-    private static final int PROFILE_COLUMN_WIDTH = 100;
-    private static final int PROFILE_COLUMN_GAP = 4;
+    private boolean dropdownOpen = false;
+    private Set<Identifier> lastSeenKeys = new HashSet<>();
+    private static String preservedQuery = "";
+    @Nullable
+    private static Identifier preservedKey = null;
+    private static boolean restorePending = false;
 
     private record Profile(Identifier key, @Nullable UUID uuid, String name) {
     }
@@ -110,6 +113,12 @@ public class ChestTrackerScreen extends Screen {
             return;
         }
         initializedOnce = true;
+        this.lastSeenKeys = new HashSet<>(bank.getKeys());
+        if (restorePending) {
+            restorePending = false;
+            if (preservedKey != null && bank.getKeys().contains(preservedKey))
+                this.currentMemoryKey = preservedKey;
+        }
         var config = ChestTrackerConfig.INSTANCE.instance();
         var liveGridWidth = config.gui.gridWidth + 1;
         var liveGridHeight = config.gui.gridHeight + 1;
@@ -168,6 +177,8 @@ public class ChestTrackerScreen extends Screen {
         this.search.setValue(this.search.getValue());
         this.search.setTabOrderGroup(-1);
         ifSearchables(() -> this.addRenderableWidget(SearchablesUtil.getWrappedAutocomplete(this.search)));
+        if (!preservedQuery.isEmpty() && this.search != null) this.search.setValue(preservedQuery);
+        preservedQuery = "";
 
         if (shouldFocusSearch)
             this.setInitialFocus(search);
@@ -268,7 +279,12 @@ public class ChestTrackerScreen extends Screen {
                 if (buttons.containsKey(this.currentMemoryKey))
                     buttons.get(this.currentMemoryKey).setHighlighted(false);
                 if (this.echestButton != null) this.echestButton.setHighlighted(false);
-                refreshProfileLabels(null);
+                // leaving the dropdown: close it
+                this.dropdownOpen = false;
+                this.profileRows.forEach(p -> {
+                    p.visible = false;
+                    p.setHighlighted(false);
+                });
 
                 // set item list
                 this.currentMemoryKey = resloc;
@@ -288,7 +304,7 @@ public class ChestTrackerScreen extends Screen {
 
         // ender chest profiles: single shared icon + collapsible per-player column.
         // Without this every synced player's ender chest would be indistinguishable.
-        this.profileButtons.clear();
+        this.profileRows.clear();
         this.profiles.clear();
         this.echestButton = null;
         var echestKeys = bank.getKeys().stream()
@@ -301,36 +317,55 @@ public class ChestTrackerScreen extends Screen {
                     Items.ENDER_CHEST.getDefaultInstance(),
                     this.left - MEMORY_ICON_OFFSET,
                     this.top + echestIndex * MEMORY_ICON_SPACING, b -> {
-                this.profilesExpanded = !this.profilesExpanded;
-                this.profileButtons.forEach(p -> p.visible = this.profilesExpanded);
-                if (this.profilesExpanded) selectOwnProfile(buttons);
+                this.dropdownOpen = !this.dropdownOpen;
+                this.profileRows.forEach(p -> p.visible = this.dropdownOpen);
+                if (this.dropdownOpen && !EnderChestKeys.isProfileKey(this.currentMemoryKey))
+                    selectOwnProfile(buttons);
+                else if (this.dropdownOpen) refreshRowHighlight();
             }, ItemButton.Background.CUSTOM));
             this.echestButton.setTooltip(Tooltip.create(
                     Component.literal("Ender Chests (" + profiles.size() + " players)")));
-            int profileX = this.left - MEMORY_ICON_OFFSET - PROFILE_COLUMN_GAP - PROFILE_COLUMN_WIDTH;
             for (int i = 0; i < profiles.size(); i++) {
                 Profile profile = profiles.get(i);
-                Button profileButton = Button.builder(Component.literal(profile.name()),
-                                b -> selectProfile(profile, buttons))
-                        .bounds(profileX,
-                                this.top + (echestIndex + 1 + i) * MEMORY_ICON_SPACING,
-                                PROFILE_COLUMN_WIDTH,
-                                ItemButton.SIZE)
-                        .tooltip(Tooltip.create(Component.literal(profile.key().toString())))
-                        .build();
-                profileButton.visible = this.profilesExpanded;
-                this.addRenderableWidget(profileButton);
-                this.profileButtons.add(profileButton);
+                EnderProfileButton row = new EnderProfileButton(
+                        EnderProfileButton.headFor(profile.uuid()),
+                        this.left - MEMORY_ICON_OFFSET,
+                        this.top + (echestIndex + 1 + i) * MEMORY_ICON_SPACING,
+                        b -> selectProfile(profile, buttons));
+                row.setTooltip(Tooltip.create(EnderProfileButton.nameTooltip(profile.name(), profile.uuid())));
+                row.visible = this.dropdownOpen;
+                this.addRenderableWidget(row);
+                this.profileRows.add(row);
             }
-            this.profilesExpanded = EnderChestKeys.isProfileKey(this.currentMemoryKey);
-            this.profileButtons.forEach(p -> p.visible = this.profilesExpanded);
+            this.dropdownOpen = EnderChestKeys.isProfileKey(this.currentMemoryKey);
+            this.profileRows.forEach(p -> p.visible = this.dropdownOpen);
             if (EnderChestKeys.isProfileKey(this.currentMemoryKey)) {
                 this.echestButton.setHighlighted(true);
-                refreshProfileLabels(this.currentMemoryKey);
+                refreshRowHighlight();
             }
         }
 
         updateItems();
+    }
+
+    @Override
+    public void tick() {
+        super.tick();
+        // pulls can land new profiles while the screen is open — rebuild so they appear
+        // without needing to close and reopen (query + selection survive, see below)
+        var bankOpt = MemoryBankAccessImpl.INSTANCE.getLoadedInternal();
+        if (bankOpt.isEmpty()) return;
+        Set<Identifier> keys = bankOpt.get().getKeys();
+        if (this.lastSeenKeys.isEmpty()) {
+            this.lastSeenKeys = new HashSet<>(keys);
+            return;
+        }
+        if (!this.lastSeenKeys.equals(keys)) {
+            preservedQuery = this.search != null ? this.search.getValue() : "";
+            preservedKey = this.currentMemoryKey;
+            restorePending = true;
+            Minecraft.getInstance().setScreen(new ChestTrackerScreen(this.parent));
+        }
     }
 
     private void collectProfiles(MemoryBankImpl bank) {
@@ -365,7 +400,7 @@ public class ChestTrackerScreen extends Screen {
         this.currentMemoryKey = profile.key();
         updateItems();
         if (this.echestButton != null) this.echestButton.setHighlighted(true);
-        refreshProfileLabels(profile.key());
+        refreshRowHighlight();
     }
 
     private void selectOwnProfile(Map<Identifier, ItemButton> buttons) {
@@ -380,13 +415,9 @@ public class ChestTrackerScreen extends Screen {
         if (!this.profiles.isEmpty()) selectProfile(this.profiles.get(0), buttons);
     }
 
-    private void refreshProfileLabels(@Nullable Identifier selected) {
-        for (int i = 0; i < this.profiles.size() && i < this.profileButtons.size(); i++) {
-            Profile profile = this.profiles.get(i);
-            String label = profile.name();
-            if (profile.key().equals(selected)) label = "▶ " + label;
-            this.profileButtons.get(i).setMessage(Component.literal(label));
-        }
+    private void refreshRowHighlight() {
+        for (int i = 0; i < this.profiles.size() && i < this.profileRows.size(); i++)
+            this.profileRows.get(i).setHighlighted(this.profiles.get(i).key().equals(this.currentMemoryKey));
     }
 
     private void cycleItemSort(ChangeableImageButton button) {
