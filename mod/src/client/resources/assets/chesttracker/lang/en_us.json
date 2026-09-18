@@ -74,6 +74,8 @@
   "chesttracker.gui.editMemoryBank.cmsync.syncNames.tooltip": "Sync container custom names with the team.",
   "chesttracker.gui.editMemoryBank.cmsync.chatNotifications": "Chat notifications",
   "chesttracker.gui.editMemoryBank.cmsync.chatNotifications.tooltip": "Show a chat message when a sync cycle completes.",
+  "chesttracker.gui.editMemoryBank.cmsync.adminToken": "Admin token",
+  "chesttracker.gui.editMemoryBank.cmsync.adminTokenHint": "Admin password for wipe (stored on this PC only)",
   "chesttracker.gui.editMemoryBank.cmsettings": "CM Settings",
   "chesttracker.gui.editMemoryBank.cmsettings.desc": "Advanced team-sync options for this server.",
 

@@ -93,9 +93,11 @@ public class CMSyncManager {
     public void markActivated(String bankId, String serverId) {
         resetSession();
         this.activeBankId = bankId;
+        CMSyncLog.log("session", "activated bank=" + bankId + " server=" + serverId + " mod=" + MOD_VERSION);
     }
 
     public void deactivate() {
+        CMSyncLog.log("session", "deactivated bank=" + activeBankId);
         resetSession();
     }
 
@@ -146,6 +148,7 @@ public class CMSyncManager {
         if (generation <= s.generation) return false;
         s.generation = generation;
         s.save(bankId);
+        CMSyncLog.log("wipe", "bank=" + bankId + " applied server generation " + generation + ", locals cleared");
         MemoryBankAccessImpl.INSTANCE.getLoadedInternal().ifPresent(bank -> {
             if (!bank.getId().equals(bankId)) return;
             for (Identifier k : new ArrayList<>(bank.getKeys())) bank.removeKey(k);
@@ -237,6 +240,7 @@ public class CMSyncManager {
             }
         }
         // backing off after transport failures — unless deletes are pending
+        boolean quietBypass = now < quietUntilMs && !deletedPairs.isEmpty();
         if (now < quietUntilMs && deletedPairs.isEmpty()) return;
         // queue lane: if network busy, skip this tick (coalesce) — keeps FPS smooth
         if (!CMSyncQueue.tryClaim()) return;
@@ -291,8 +295,11 @@ public class CMSyncManager {
         } catch (RuntimeException ex) {
             CMSyncQueue.release();
             LOGGER.warn("cmsync snapshot copy failed", ex);
+            CMSyncLog.log("cycle", "snapshot copy FAILED: " + CMSyncLog.trunc(ex.getMessage(), 160));
             return;
         }
+        CMSyncLog.log("cycle", "bank=" + bankId + " snapshot=" + snapshot.size()
+                + " deletes=" + deletedPairs.size() + (quietBypass ? " quiet-bypass" : ""));
 
         // ---- everything heavy runs on queue lane ----
         CMSyncQueue.executor().execute(() -> {
@@ -390,6 +397,7 @@ public class CMSyncManager {
                 }
             });
             doPullBlocking(client, bankId, url, token, playerUuid, serverId, playerName, serverName, mcVersion, playerPos, dim, syncContainerNames, chatNotifications);
+            CMSyncLog.log("hold", "bank=" + bankId + " held empty bank (" + lastPushedCount + " before), pull-only");
             return;
         }
         emptyHoldNotified = false;
@@ -412,6 +420,10 @@ public class CMSyncManager {
         try {
             if (dirty && !emptyLocal) {
                 CMSyncHttp.PushOutcome push = CMSyncHttp.push(url, token, ident, prevHash, fullHash, changes).join();
+                CMSyncLog.log("push", "bank=" + bankId + " result=" + push.result()
+                        + " http=" + push.statusCode() + " ms=" + push.tookMs()
+                        + " upserts=" + upsertCount + " deletes=" + deletedPairs.size()
+                        + (push.note().isEmpty() ? "" : " note=" + CMSyncLog.trunc(push.note(), 160)));
                 if (push.tookMs() > 10_000) {
                     LOGGER.warn("cmsync slow push: {} containers + {} deletes took {}ms (HTTP {})",
                             upsertCount, deletedPairs.size(), push.tookMs(), push.statusCode());
@@ -457,7 +469,8 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
             pull = CMSyncHttp.pull(url, token, serverId, playerUuid,
                     playerPos.getX(), playerPos.getY(), playerPos.getZ(), dim).join();
         } catch (RuntimeException ex) {
-            client.execute(() -> handlePullError(client, bankId));
+            CMSyncLog.log("pull", "bank=" + bankId + " THREW: " + CMSyncLog.trunc(ex.getMessage(), 200));
+            client.execute(() -> handlePullError(client, bankId, CMSyncLog.trunc(ex.getMessage(), 160)));
             return;
         }
         final CMSyncHttp.PullOutcome f = pull;
@@ -482,6 +495,9 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
                 quietUntilMs = 0;
                 lastSuccess = Instant.now();
                 lastResult = "synced";
+                CMSyncLog.log("pull", "bank=" + bankId + " SYNCED changes=" + f.changes().size()
+                        + " tombs=" + f.tombstones().size() + " containers=" + f.containers()
+                        + " gen=" + f.generation() + " owners=" + f.owners().size());
                 if (failing) {
                     failing = false;
                     sendChat(client, Component.literal("CMSync re-established"), ChatFormatting.GREEN);
@@ -491,6 +507,8 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
                 }
             } else {
                 lastResult = f.result().name();
+                CMSyncLog.log("pull", "bank=" + bankId + " result=" + f.result()
+                        + (f.note().isEmpty() ? "" : " note=" + CMSyncLog.trunc(f.note(), 160)));
                 if (f.result() == CMSyncHttp.Result.CONNECTION_FAILED) {
                     consecutiveConnFails++;
                     quietUntilMs = System.currentTimeMillis()
@@ -498,7 +516,9 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
                 }
                 if (!failing) {
                     failing = true;
-                    sendChat(client, Component.literal("CMSync pull failed: " + f.result()), ChatFormatting.RED);
+                    String msg = "CMSync pull failed: " + f.result()
+                            + (f.note().isEmpty() ? "" : " — " + CMSyncLog.trunc(f.note(), 120));
+                    sendChat(client, Component.literal(msg), ChatFormatting.RED);
                 }
             }
         });
@@ -515,6 +535,9 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
         DynamicOps<JsonElement> ops =
                 client.level.registryAccess().createSerializationContext(JsonOps.INSTANCE);
 
+        int applied = 0;
+        int tombsApplied = 0;
+        int skipped = 0;
         for (JsonObject ch : changes) {
             try {
                 Identifier key = Identifier.parse(ch.get("key").getAsString());
@@ -579,6 +602,7 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
                             loadedTime, gameTime, Instant.now(), null, null);
                 }
                 bank.addMemory(key, pos, mem);
+                applied++;
 
                 // overrides ride with their entry; v2 senders without the blob explicitly cleared
                 if (!legacy && syncContainerNames) {
@@ -594,6 +618,7 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
                     }
                 }
             } catch (RuntimeException e) {
+                skipped++;
                 LOGGER.warn("skip bad pull entry: {}", e.getMessage());
             }
         }
@@ -610,10 +635,14 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
                 if (local != null && del != null && local.realTimestamp() != null
                         && local.realTimestamp().isAfter(del)) continue;
                 bank.removeMemory(kid, pos);
+                tombsApplied++;
             } catch (RuntimeException e) {
+                skipped++;
                 LOGGER.warn("skip bad tombstone: {}", e.getMessage());
             }
         }
+        CMSyncLog.log("merge", "bank=" + bankId + " applied=" + applied
+                + " tombs=" + tombsApplied + " skipped=" + skipped);
     }
 
     private static boolean overrideStateEquals(@Nullable OverrideInfo local,
@@ -654,6 +683,7 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
         this.lastDetail = note;
         if (!note.equals(deterministicNote)) {
             this.deterministicNote = note;
+            CMSyncLog.log("reject", "bank=" + bankId + " push rejected: " + CMSyncLog.trunc(note, 200));
             sendChat(client, Component.literal("CMSync push rejected by server: " + note), ChatFormatting.RED);
             sendChat(client, Component.literal("Push paused 5 min, pulls continue. "
                     + "If this persists, check the server log or update the mod."), ChatFormatting.GRAY);
@@ -665,7 +695,7 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
                                   @Nullable String hash, boolean skipped, String note, int pushedCount,
                                   int statusCode, long tookMs) {
         if (!bankId.equals(activeBankId)) return;
-        this.lastDetail = pushDetail(r, statusCode, tookMs, pushedCount);
+        this.lastDetail = pushDetail(r, statusCode, tookMs, pushedCount, note);
         if (r == CMSyncHttp.Result.SYNCED) {
             if (!skipped) {
                 lastPushHash = hash;
@@ -685,6 +715,7 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
             lastResult = "quarantined";
             consecutiveConnFails = 0;
             quietUntilMs = 0;
+            CMSyncLog.log("quarantine", "bank=" + bankId + " held mass-delete: " + CMSyncLog.trunc(note, 200));
             sendChat(client, Component.literal("CMSync held mass-delete: " + note), ChatFormatting.YELLOW);
         } else {
             lastResult = r.name();
@@ -698,27 +729,36 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
             }
             if (!failing) {
                 failing = true;
-                sendChat(client, Component.literal("CMSync push failed: " + r), ChatFormatting.RED);
+                String msg = "CMSync push failed: " + r
+                        + (note == null || note.isEmpty() ? "" : " — " + CMSyncLog.trunc(note, 120));
+                sendChat(client, Component.literal(msg), ChatFormatting.RED);
             }
         }
     }
 
-    private static String pushDetail(CMSyncHttp.Result r, int statusCode, long tookMs, int pushedCount) {
+    private static String pushDetail(CMSyncHttp.Result r, int statusCode, long tookMs, int pushedCount, String note) {
+        String base;
         if (r == CMSyncHttp.Result.SYNCED)
-            return "push HTTP " + statusCode + " in " + tookMs + "ms, " + pushedCount + " containers";
-        if (statusCode > 0) return "push HTTP " + statusCode + " (" + r + ")";
-        return "push failed: " + r + (tookMs > 0 ? " after " + tookMs + "ms" : "");
+            base = "push HTTP " + statusCode + " in " + tookMs + "ms, " + pushedCount + " containers";
+        else if (statusCode > 0) base = "push HTTP " + statusCode + " (" + r + ")";
+        else base = "push failed: " + r + (tookMs > 0 ? " after " + tookMs + "ms" : "");
+        if (note != null && !note.isEmpty()) base += " — " + CMSyncLog.trunc(note, 160);
+        return base;
     }
 
-    private void handlePullError(Minecraft client, String bankId) {
+    private void handlePullError(Minecraft client, String bankId, String note) {
         if (!bankId.equals(activeBankId)) return;
         lastResult = "connection failed";
+        lastDetail = "pull failed: connection failed" + (note.isEmpty() ? "" : " — " + note);
         consecutiveConnFails++;
         quietUntilMs = System.currentTimeMillis()
                 + Math.min(60_000L, 5_000L << Math.min(consecutiveConnFails - 1, 3));
+        CMSyncLog.log("pull", "bank=" + bankId + " THREW connection failed"
+                + (note.isEmpty() ? "" : " note=" + CMSyncLog.trunc(note, 160)));
         if (!failing) {
             failing = true;
-            sendChat(client, Component.literal("CMSync connection failed"), ChatFormatting.RED);
+            sendChat(client, Component.literal("CMSync connection failed"
+                    + (note.isEmpty() ? "" : ": " + CMSyncLog.trunc(note, 120))), ChatFormatting.RED);
         }
     }
 

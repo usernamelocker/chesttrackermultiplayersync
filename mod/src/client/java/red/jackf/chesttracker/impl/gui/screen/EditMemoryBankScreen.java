@@ -20,6 +20,7 @@ import net.minecraft.SharedConstants;
 import red.jackf.chesttracker.api.memory.counting.StackMergeMode;
 import red.jackf.chesttracker.api.providers.ProviderUtils;
 import red.jackf.chesttracker.impl.cmsync.CMSyncHttp;
+import red.jackf.chesttracker.impl.cmsync.CMSyncLog;
 import red.jackf.chesttracker.impl.cmsync.CMSyncManager;
 import red.jackf.chesttracker.impl.cmsync.CMSyncSettings;
 import red.jackf.chesttracker.impl.config.ChestTrackerConfig;
@@ -856,12 +857,40 @@ public class EditMemoryBankScreen extends BaseUtilScreen {
                 .bounds(getSettingsX(0), getSettingsY(4), getSettingsWidth(2), BUTTON_HEIGHT)
                 .build();
         addSetting(chatNotifButton, SettingsTab.CMSETTINGS);
+
+        // row 5: admin token for /cmsync wipealldata (masked, stored on this PC only)
+        var adminLabel = new StringWidget(getSettingsX(0),
+                                          getSettingsY(5),
+                                          getSettingsWidth(1),
+                                          BUTTON_HEIGHT,
+                                          translatable("chesttracker.gui.editMemoryBank.cmsync.adminToken"),
+                                          font);
+        addSetting(adminLabel, SettingsTab.CMSETTINGS);
+
+        var adminBox = new CustomEditBox(font,
+                                         getSettingsX(1),
+                                         getSettingsY(5),
+                                         getSettingsWidth(1),
+                                         BUTTON_HEIGHT,
+                                         null,
+                                         CommonComponents.EMPTY);
+        adminBox.setMaxLength(256);
+        adminBox.setHint(translatable("chesttracker.gui.editMemoryBank.cmsync.adminTokenHint"));
+        adminBox.setValue(Optional.ofNullable(settings.adminToken).orElse(""));
+        adminBox.addFormatter(
+                (text, cursor) -> FormattedCharSequence.forward("*".repeat(text.length()), Style.EMPTY));
+        adminBox.setResponder(s -> {
+            CMSyncSettings ss = CMSyncSettings.load(this.memoryBank.id());
+            ss.adminToken = s.isBlank() ? null : s.strip();
+            ss.save(this.memoryBank.id());
+        });
+        addSetting(adminBox, SettingsTab.CMSETTINGS);
     }
 
-    /** "Label: Enabled/Disabled" for CMSETTINGS toggle buttons. */
+    /** "Label: On/Off" for CMSETTINGS toggle buttons (options.on/off are vanilla keys). */
     private static Component toggleMessage(String labelKey, boolean on) {
         return translatable(labelKey).append(": ")
-                .append(translatable(on ? "gui.enabled" : "gui.disabled"));
+                .append(translatable(on ? "options.on" : "options.off"));
     }
 
     private Component cmsyncStateText(CMSyncSettings settings) {
@@ -908,8 +937,12 @@ public class EditMemoryBankScreen extends BaseUtilScreen {
                 Minecraft.getInstance().execute(() -> {
                     if (this.cmsyncConnectButton != null) this.cmsyncConnectButton.active = true;
                     var outcome = throwable != null
-                            ? new CMSyncHttp.HandshakeOutcome(CMSyncHttp.Result.CONNECTION_FAILED, -1) : handshake;
+                            ? new CMSyncHttp.HandshakeOutcome(CMSyncHttp.Result.CONNECTION_FAILED, -1,
+                            throwable.getMessage()) : handshake;
 
+                    CMSyncLog.log("connect", "url=" + parsed + " result=" + outcome.result()
+                            + " gen=" + outcome.generation()
+                            + (outcome.note().isEmpty() ? "" : " note=" + CMSyncLog.trunc(outcome.note(), 160)));
                     if (outcome.result() == CMSyncHttp.Result.SYNCED) {
                         CMSyncSettings viewSettings = CMSyncSettings.load(bankId);
                         viewSettings.url = parsed.toString();

@@ -34,6 +34,8 @@ public class CMSyncSettings {
     public boolean syncContainerNames = true;
     /** Show chat notification when a sync cycle completes (push+pull). */
     public boolean chatNotifications = true;
+    /** Admin password for /cmsync wipealldata (falls back to the sync token). */
+    @Nullable public String adminToken = null;
     /** Last wipe generation seen from the server. A newer generation clears locals. */
     public int generation = 0;
     /** Teammate uuid -> last seen name (for ender chest profiles). Refreshed on every pull. */
@@ -80,6 +82,7 @@ public class CMSyncSettings {
             if (o.has("syncEnderChest")) st.syncEnderChest = o.get("syncEnderChest").getAsBoolean();
             if (o.has("syncContainerNames")) st.syncContainerNames = o.get("syncContainerNames").getAsBoolean();
             if (o.has("chatNotifications")) st.chatNotifications = o.get("chatNotifications").getAsBoolean();
+            if (o.has("adminToken")) st.adminToken = o.get("adminToken").isJsonNull() ? null : o.get("adminToken").getAsString();
             try {
                 if (o.has("generation") && !o.get("generation").isJsonNull())
                     st.generation = o.get("generation").getAsInt();
@@ -112,6 +115,7 @@ public class CMSyncSettings {
             o.addProperty("syncEnderChest", syncEnderChest);
             o.addProperty("syncContainerNames", syncContainerNames);
             o.addProperty("chatNotifications", chatNotifications);
+            o.addProperty("adminToken", adminToken);
             o.addProperty("generation", generation);
             JsonObject owners = new JsonObject();
             for (var e : ownerNames.entrySet()) owners.addProperty(e.getKey(), e.getValue());
