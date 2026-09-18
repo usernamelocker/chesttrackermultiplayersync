@@ -190,9 +190,9 @@ def pull(serverId: str = Query(...), since: str | None = Query(default=None),
             for pos, mem in positions.items():
                 if since and mem.get("updatedAt", "") <= since:
                     continue
-                changes.append({"key": key, "pos": pos, "deleted": False, **mem})
+                changes.append({"key": key, "deleted": False, **mem})
         tombs = [dict(r) for r in con.execute(
-            "SELECT key,pos,deleted_at FROM tombstones WHERE server_id=?", (sid,))]
+            "SELECT key,deleted_at FROM tombstones WHERE server_id=?", (sid,))]
         return {"status": "SYNCED", "serverTime": time.time(), "cursor": since or "",
                 "changes": changes, "tombstones": tombs, "owners": db.get_owners(con, sid),
                 "containers": sum(len(v) for v in state.values())}
