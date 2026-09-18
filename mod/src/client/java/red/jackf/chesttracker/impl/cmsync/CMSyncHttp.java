@@ -172,7 +172,7 @@ public class CMSyncHttp {
                 .exceptionally(t -> {
                     System.out.println("Error in exceptionally:");
                     t.printStackTrace();
-                    new PushOutcome(classifyError(t), t.getMessage(), -1, -1,
+                    return new PushOutcome(classifyError(t), t.getMessage(), -1, -1,
                             System.currentTimeMillis() - start);
                 });
     }
