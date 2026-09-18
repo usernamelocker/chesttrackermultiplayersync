@@ -53,13 +53,11 @@
 * Prerelease 8 (`cmsync-1.21.11-8`): broken/emptied chests propagate as tombstones
   (no more resurrection); `/cmsync wipealldata` two-step admin wipe with wipe
   generation (online clients cleared, offline cleared on return, snapshots kept).
-  INSTALL THIS ONE (needs VPS redeploy too).
-* Native tab inside EditMemoryBankScreen (v1 uses standalone `/cmsync gui` screen instead — simpler, version-proof).
-* 26.1.2/26.2 branch builds (same overlay, see porting doc).
-* Live Portainer deploy (repo is on GitHub private; needs your 2 env vars + Deploy click).
+* Prerelease 9 (`cmsync-1.21.11-9`): mass breaks go straight through with one warning;
+  only an established bank reading completely empty holds (hub-wipe). Server quarantine
+  replaced by snapshot + warning log. INSTALL THIS ONE (needs VPS redeploy too).
 
-## Your 3 inputs needed to go live
+## Live state
 
-1. `/cmsync status` → exact `serverId` → Portainer env `EXPECTED_SERVER_ID`
-2. Friend UUIDs → Portainer env `WHITELIST_UUIDS`
-3. `http://VPS-IP:7000/health` → `{"ok":true}`, then connect from game
+* VPS: cmsync 2.3 expected (Update the `chest-tracker` stack after pushing).
+* 26.1.2 branch mirrors main's features (see `26.1.2` branch + `cmsync-26.1.2-*` releases).

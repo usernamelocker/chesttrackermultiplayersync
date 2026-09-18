@@ -38,13 +38,14 @@ def test_lww():
     print("lww ok")
 
 def test_mass_delete_guard():
-    assert db.should_quarantine_mass_delete(100, 25) is True
-    assert db.should_quarantine_mass_delete(100, 5) is False
-    assert db.should_quarantine_mass_delete(0, 0) is False
-    assert db.should_quarantine_mass_delete(10, 50) is True
-    assert db.should_quarantine_mass_delete(3, 3) is False
-    assert db.should_quarantine_mass_delete(9, 9) is False
-    assert db.should_quarantine_mass_delete(10, 3) is True
+    assert db.mass_delete_detected(100, 25) is True
+    assert db.mass_delete_detected(100, 5) is False
+    assert db.mass_delete_detected(0, 0) is False
+    assert db.mass_delete_detected(10, 50) is True
+    assert db.mass_delete_detected(3, 3) is False
+    assert db.mass_delete_detected(9, 9) is False
+    assert db.mass_delete_detected(10, 3) is True
+    assert db.should_quarantine_mass_delete(100, 25) is True  # alias kept
     print("guard ok")
 
 

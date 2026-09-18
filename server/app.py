@@ -18,7 +18,7 @@ import db
 from models import Change, HandshakeRequest, PushRequest
 
 app = FastAPI(title="CMSync", version="2.0.0")
-CMSYNC_SERVER = "2.2"  # bump on any server behavior change; visible in /health
+CMSYNC_SERVER = "2.3"  # bump on any server behavior change; visible in /health
 _log = logging.getLogger("cmsync")
 # Explicit handler: uvicorn's default config leaves the root logger handler-less,
 # so INFO records would silently vanish (only WARNING+ reaches stderr).
@@ -133,14 +133,14 @@ def push(req: PushRequest, x_cmsync_token: str | None = Header(default=None, ali
             return {"status": "SYNCED", "applied": 0, "skipped_stale": 0,
                     "note": "ignored empty push (possible hub-wipe)", "containers": existing}
 
-        # Mass-delete guard: quarantine, snapshot first, do not apply deletes.
-        if db.should_quarantine_mass_delete(existing, deletes,
+        # Mass deletes go straight through (with a pre-delete snapshot + warning log
+        # so accidents stay recoverable). Only fully-empty pushes are ignored (hub-wipe).
+        if deletes > 0 and db.mass_delete_detected(existing, deletes,
                                             config.MAX_DELETE_FRACTION, config.MAX_DELETE_COUNT,
                                             config.MIN_QUARANTINE_BANK):
             snap_id = db.take_snapshot(con, sid, config.SNAPSHOT_KEEP)
-            return JSONResponse({"status": "QUARANTINED",
-                                 "reason": f"mass delete: {deletes} deletes vs {existing} stored",
-                                 "snapshotId": snap_id, "containers": existing})
+            _log.warning("MASS DELETE %s: %s deletes vs %s stored by %s (snapshot %s)",
+                         sid, deletes, existing, req.playerUuid, snap_id)
 
         # v1-compat: full-snapshot posts arrive as PushRequest with many upserts; LWW handles them.
         res = db.apply_changes(con, sid, changes)

@@ -93,9 +93,9 @@ assert r["status"] == "SYNCED", r
 assert c.get(f"/api/view/{SID}").json()["containers"] == 62
 wiped = [change("minecraft:overworld", f"{i},64,0", 12, [], deleted=True) for i in range(55)]
 r = c.post("/api/push", json=dict(ident(ALICE), fullHash="h3", changes=wiped)).json()
-assert r["status"] == "QUARANTINED", r
-assert c.get(f"/api/view/{SID}").json()["containers"] == 62, "mass delete must not apply"
-print("quarantine ok")
+assert r["status"] == "SYNCED" and r["applied"] == 55, r  # mass deletes apply (snapshot+warn server-side)
+assert c.get(f"/api/view/{SID}").json()["containers"] == 7, "62 - 55 deletes"
+print("mass delete ok")
 
 snaps = c.get("/api/snapshots", params={"serverId": SID}).json()["snapshots"]
 assert len(snaps) >= 2, snaps

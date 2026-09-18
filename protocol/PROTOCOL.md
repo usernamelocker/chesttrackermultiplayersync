@@ -67,9 +67,11 @@ Client stores base URL per bank on `SYNCED` only.
 
 * One entry per container `(key,pos)`. `deleted=true` creates a tombstone.
 * Server applies per-entry LWW on `updatedAt`; stale entries ignored.
-* **Mass-delete guard:** if a single push deletes > `MAX_DELETE_FRACTION` (default 20%) or
-  > `MAX_DELETE_COUNT` (default 50), server quarantines it: stores snapshot, returns
-  `{status: QUARANTINED, reason}` and does NOT apply deletes. Client shows chat warning.
+* **Mass deletes go straight through:** bursts (deletes > `MAX_DELETE_COUNT`, default 50,
+  or > `MAX_DELETE_FRACTION`, default 20%, of banks ≥ `MIN_QUARANTINE_BANK`, default 10)
+  trigger a pre-delete snapshot + warning log, then apply. Only fully-empty pushes are
+  ignored (hub-wipe protection); an established bank reading completely empty is held
+  client-side instead.
 * Empty `changes` with `fullHash` matching server = no-op (used for keepalive/hash check).
 * **Empty-bank rule:** if `changes` is empty AND `fullHash` == hash(empty) while server has >0 containers,
   server ignores (protects hub-wipe). Client must also skip push in that case.
