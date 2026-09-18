@@ -372,15 +372,12 @@ public class ChestTrackerScreen extends Screen {
         UUID ownUuid = player != null ? player.getUUID() : null;
         List<Profile> others = new ArrayList<>();
         Profile own = null;
-        Profile legacy = null;
         for (Identifier key : bank.getKeys()) {
             if (!EnderChestKeys.isProfileKey(key)) continue;
+            // legacy shared keys are hidden (migration absorbs them on load)
+            if (EnderChestKeys.isHiddenLegacyKey(key)) continue;
             Optional<UUID> owner = EnderChestKeys.ownerUuid(key);
-            if (owner.isEmpty()) {
-                // pre-migration leftover or unknown shape: still viewable, never merged
-                legacy = new Profile(key, null, "Legacy");
-                continue;
-            }
+            if (owner.isEmpty()) continue;
             String name = CMSyncManager.INSTANCE.ownerName(bank.getId(), owner.get());
             if (name == null) name = "Player " + owner.get().toString().substring(0, 8);
             Profile profile = new Profile(key, owner.get(), name);
@@ -390,7 +387,6 @@ public class ChestTrackerScreen extends Screen {
         others.sort(Comparator.comparing(Profile::name, String.CASE_INSENSITIVE_ORDER));
         if (own != null) this.profiles.add(own);
         this.profiles.addAll(others);
-        if (legacy != null) this.profiles.add(legacy);
     }
 
     private void selectProfile(Profile profile, Map<Identifier, ItemButton> buttons) {

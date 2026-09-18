@@ -206,17 +206,49 @@ public class CMSyncManager {
         if (now - lastAttemptMs < Math.max(2, settings.intervalSeconds) * 1000L) return;
         // deterministic rejection cooling down: stay quiet, don't burn the lane
         if (now < deterministicUntilMs) return;
-        // backing off after transport failures: stay quiet, don't burn the lane
-        if (now < quietUntilMs) return;
+
+        final boolean syncEnder = settings.syncEnderChest;
+        final boolean syncContainerNames = settings.syncContainerNames;
+        final boolean chatNotifications = settings.chatNotifications;
+
+        // ---- cheap delete peek (key strings only, no copies): broken/emptied
+        // containers bypass the transport backoff below so ghosts vanish promptly
+        // instead of waiting out a cooldown. Never fires on a fresh baseline, an
+        // empty bank (hub-wipe safety), or a filter-toggle tick.
+        List<String[]> deletedPairs = new ArrayList<>();
+        Map<String, Set<String>> curKeys = new HashMap<>();
+        for (Map.Entry<Identifier, MemoryKeyImpl> e : bank.getMemories().entrySet()) {
+            if (EnderChestKeys.isHiddenLegacyKey(e.getKey())) continue;
+            if (!syncEnder && EnderChestKeys.isSyncableEnderKey(e.getKey())) continue;
+            Set<String> set = new HashSet<>();
+            for (Map.Entry<BlockPos, Memory> m : e.getValue().getMemories().entrySet()) {
+                // must mirror the copy loop's entity skip exactly, or phantom deletes appear
+                if (m.getValue().entityId() != null) continue;
+                set.add(ItemNormalizer.posToString(m.getKey()));
+            }
+            curKeys.put(e.getKey().toString(), set);
+        }
+        if (lastSnapshotKeys != null && Objects.equals(lastSyncEnder, syncEnder)) {
+            for (var e : lastSnapshotKeys.entrySet()) {
+                Set<String> cur = curKeys.getOrDefault(e.getKey(), Set.of());
+                for (String pos : e.getValue()) {
+                    if (!cur.contains(pos)) deletedPairs.add(new String[]{e.getKey(), pos});
+                }
+            }
+        }
+        // backing off after transport failures — unless deletes are pending
+        if (now < quietUntilMs && deletedPairs.isEmpty()) return;
         // queue lane: if network busy, skip this tick (coalesce) — keeps FPS smooth
         if (!CMSyncQueue.tryClaim()) return;
         lastAttemptMs = now;
+        lastSnapshotKeys = curKeys;
+        lastSyncEnder = syncEnder;
+        final String deleteStamp = Instant.now().toString();
 
         // ---- fast copy on client thread (no Gson, no codec, no HTTP) ----
         final String bankId = bank.getId();
         final String url = settings.url;
         final String token = settings.token;
-        final boolean syncEnder = settings.syncEnderChest;
         final String playerUuid = client.player.getUUID().toString();
         final String playerName = client.player.getName().getString();
         final String serverId = coord.id();
@@ -262,32 +294,12 @@ public class CMSyncManager {
             return;
         }
 
-        // ---- delete detection: present last snapshot, gone now (broken/emptied).
-        // Never fires on a fresh baseline, an empty bank (hub-wipe safety), or a
-        // filter-toggle tick — those re-baseline instead. Surviving deletes ride the
-        // next push as tombstones so the server (and teammates) forget them too.
-        List<String[]> deletedPairs = new ArrayList<>();
-        Map<String, Set<String>> curKeys = new HashMap<>();
-        for (RawEntry r : snapshot)
-            curKeys.computeIfAbsent(r.key(), k -> new HashSet<>()).add(r.pos());
-        if (lastSnapshotKeys != null && Objects.equals(lastSyncEnder, syncEnder)) {
-            for (var e : lastSnapshotKeys.entrySet()) {
-                Set<String> cur = curKeys.getOrDefault(e.getKey(), Set.of());
-                for (String pos : e.getValue()) {
-                    if (!cur.contains(pos)) deletedPairs.add(new String[]{e.getKey(), pos});
-                }
-            }
-        }
-        lastSnapshotKeys = curKeys;
-        lastSyncEnder = syncEnder;
-        final String deleteStamp = Instant.now().toString();
-
         // ---- everything heavy runs on queue lane ----
         CMSyncQueue.executor().execute(() -> {
             try {
                 runSyncJob(client, bankId, url, token, playerUuid, playerName,
                         serverId, serverName, mcVersion, ops, snapshot, playerPos, dim,
-                        deletedPairs, deleteStamp);
+                        deletedPairs, deleteStamp, syncContainerNames, chatNotifications);
             } finally {
                 CMSyncQueue.release();
             }
@@ -304,7 +316,8 @@ public class CMSyncManager {
                             String playerUuid, String playerName, String serverId, String serverName,
                             String mcVersion, DynamicOps<JsonElement> ops, List<RawEntry> snapshot,
                             BlockPos playerPos, String dim,
-                            List<String[]> deletedPairs, String deleteStamp) {
+                            List<String[]> deletedPairs, String deleteStamp,
+                            boolean syncContainerNames, boolean chatNotifications) {
         List<JsonObject> changes = new ArrayList<>(snapshot.size());
         List<JsonObject> hashProj = new ArrayList<>(snapshot.size());
         for (RawEntry r : snapshot) {
@@ -376,7 +389,7 @@ public class CMSyncManager {
                             + "To truly start over, use /cmsync wipealldata."), ChatFormatting.YELLOW);
                 }
             });
-            doPullBlocking(client, bankId, url, token, playerUuid, serverId, playerName, serverName, mcVersion, playerPos, dim);
+            doPullBlocking(client, bankId, url, token, playerUuid, serverId, playerName, serverName, mcVersion, playerPos, dim, syncContainerNames, chatNotifications);
             return;
         }
         emptyHoldNotified = false;
@@ -409,14 +422,14 @@ public class CMSyncManager {
                         || push.result() == CMSyncHttp.Result.NOT_A_CMSYNC_SERVER) {
                     final String note = push.note().isEmpty() ? push.result().name() : push.note();
                     client.execute(() -> handleDeterministic(client, bankId, note));
-                    doPullBlocking(client, bankId, url, token, playerUuid, serverId, playerName, serverName, mcVersion, playerPos, dim);
+                    doPullBlocking(client, bankId, url, token, playerUuid, serverId, playerName, serverName, mcVersion, playerPos, dim, syncContainerNames, chatNotifications);
                     return;
                 }
                 client.execute(() -> handlePushResult(client, bankId, push.result(),
                         push.result() == CMSyncHttp.Result.SYNCED ? fullHash : prevHash,
                         false, push.note(), upsertCount, push.statusCode(), push.tookMs()));
                 if (push.result() == CMSyncHttp.Result.QUARANTINED) {
-                    doPullBlocking(client, bankId, url, token, playerUuid, serverId, playerName, serverName, mcVersion, playerPos, dim);
+                    doPullBlocking(client, bankId, url, token, playerUuid, serverId, playerName, serverName, mcVersion, playerPos, dim, syncContainerNames, chatNotifications);
                     return;
                 }
             } else if (emptyLocal) {
@@ -425,7 +438,7 @@ public class CMSyncManager {
                     if (bankId.equals(activeBankId)) lastResult = "empty-local, pull-only";
                 });
             }
-            doPullBlocking(client, bankId, url, token, playerUuid, serverId, playerName, serverName, mcVersion, playerPos, dim);
+            doPullBlocking(client, bankId, url, token, playerUuid, serverId, playerName, serverName, mcVersion, playerPos, dim, syncContainerNames, chatNotifications);
         } catch (RuntimeException ex) {
             LOGGER.error("cmsync job failed", ex);
             client.execute(() -> handlePushResult(client, bankId,
@@ -433,9 +446,10 @@ public class CMSyncManager {
         }
     }
 
-    private void doPullBlocking(Minecraft client, String bankId, String url, String token,
-                                String playerUuid, String serverId, String playerName,
-                                String serverName, String mcVersion, BlockPos playerPos, String dim) {
+private void doPullBlocking(Minecraft client, String bankId, String url, String token,
+                            String playerUuid, String serverId, String playerName,
+                            String serverName, String mcVersion, BlockPos playerPos, String dim,
+                            boolean syncContainerNames, boolean chatNotifications) {
         CMSyncHttp.Identity ident = new CMSyncHttp.Identity(
                 playerUuid, playerName, serverId, serverName, mcVersion, MOD_VERSION);
         CMSyncHttp.PullOutcome pull;
@@ -452,7 +466,7 @@ public class CMSyncManager {
             if (f.result() == CMSyncHttp.Result.SYNCED) {
                 // wipe first: merging pulled data into about-to-be-cleared locals is pointless
                 if (!applyServerGeneration(bankId, f.generation()))
-                    applyPull(client, bankId, f.changes(), f.tombstones(), playerUuid, mcVersion);
+                    applyPull(client, bankId, f.changes(), f.tombstones(), playerUuid, mcVersion, syncContainerNames);
                 if (!f.owners().isEmpty()) {
                     CMSyncSettings s = CMSyncSettings.load(bankId);
                     boolean changed = false;
@@ -472,6 +486,9 @@ public class CMSyncManager {
                     failing = false;
                     sendChat(client, Component.literal("CMSync re-established"), ChatFormatting.GREEN);
                 }
+                if (chatNotifications) {
+                    sendChat(client, Component.literal("Sync complete"), ChatFormatting.GREEN);
+                }
             } else {
                 lastResult = f.result().name();
                 if (f.result() == CMSyncHttp.Result.CONNECTION_FAILED) {
@@ -488,7 +505,8 @@ public class CMSyncManager {
     }
 
     private void applyPull(Minecraft client, String bankId, List<JsonObject> changes,
-                           List<JsonObject> tombstones, String myUuid, String myMc) {
+                           List<JsonObject> tombstones, String myUuid, String myMc,
+                           boolean syncContainerNames) {
         Optional<MemoryBankImpl> opt = MemoryBankAccessImpl.INSTANCE.getLoadedInternal();
         if (opt.isEmpty() || !opt.get().getId().equals(bankId) || client.level == null) return;
         MemoryBankImpl bank = opt.get();
@@ -500,6 +518,8 @@ public class CMSyncManager {
         for (JsonObject ch : changes) {
             try {
                 Identifier key = Identifier.parse(ch.get("key").getAsString());
+                // legacy shared keys stay buried (migration absorbs them on load)
+                if (EnderChestKeys.isHiddenLegacyKey(key)) continue;
                 BlockPos pos = ItemNormalizer.parsePos(ch.get("pos").getAsString());
                 String updatedBy = ItemNormalizer.optStr(ch, "updatedBy");
                 Instant pulledAt = ItemNormalizer.parseInstant(ItemNormalizer.optStr(ch, "updatedAt"));
@@ -561,7 +581,7 @@ public class CMSyncManager {
                 bank.addMemory(key, pos, mem);
 
                 // overrides ride with their entry; v2 senders without the blob explicitly cleared
-                if (!legacy) {
+                if (!legacy && syncContainerNames) {
                     if (hasOvBlob) {
                         bank.setNameOverride(key, pos, pulledOvName != null ? pulledOvName : "");
                         try {
@@ -580,6 +600,7 @@ public class CMSyncManager {
         for (JsonObject t : tombstones) {
             try {
                 Identifier kid = Identifier.parse(t.get("key").getAsString());
+                if (EnderChestKeys.isHiddenLegacyKey(kid)) continue;
                 BlockPos pos = ItemNormalizer.parsePos(t.get("pos").getAsString());
                 Instant del = ItemNormalizer.parseInstant(ItemNormalizer.optStr(t, "deleted_at"));
                 if (del == null) del = ItemNormalizer.parseInstant(ItemNormalizer.optStr(t, "deletedAt"));

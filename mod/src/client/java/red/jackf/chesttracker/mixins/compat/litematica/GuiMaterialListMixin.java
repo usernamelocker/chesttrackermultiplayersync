@@ -1,6 +1,5 @@
 package red.jackf.chesttracker.mixins.compat.litematica;
 
-import com.llamalad7.mixinextras.sugar.Local;
 import fi.dy.masa.litematica.gui.GuiMaterialList;
 import fi.dy.masa.litematica.gui.widgets.WidgetListMaterialList;
 import fi.dy.masa.litematica.gui.widgets.WidgetMaterialListEntry;
@@ -25,29 +24,28 @@ import red.jackf.whereisit.client.api.events.SearchRequestPopulator;
 
 /**
  * Adds a 'Search Missing' button to the top of the material list screen. Also adds an info button to the top right letting the user know
+ *
+ * <p>Deliberately version-proof: anchored at the TAIL of {@code initGui} with a
+ * screen-width position, touching only the stable surface (the screen class, the
+ * material list field, vanilla button widgets). Litematica renames its screen
+ * internals between releases — a removed field once crashed game start — so this
+ * mixin depends on none of them.
  */
 @Mixin(value = GuiMaterialList.class, remap = false)
 public abstract class GuiMaterialListMixin extends GuiListBase<MaterialListEntry, WidgetMaterialListEntry, WidgetListMaterialList> {
     @Shadow @Final private MaterialListBase materialList;
-    @Shadow
-    private GuiMaterialList.ExportType exportType;
 
     private GuiMaterialListMixin(int listX, int listY) {
         super(listX, listY);
     }
 
-    // bad mixin @At ik
-    @Inject(method = "createButtons",
-            at = @At(value = "INVOKE",
-                    target = "Lfi/dy/masa/litematica/gui/GuiMaterialList;createButton(IILfi/dy/masa/litematica/gui/GuiMaterialList$ButtonListener$Type;)I",
-                    ordinal = 5,
-                    shift = At.Shift.AFTER))
-    private void addSearchAllButton(CallbackInfo ci, @Local(ordinal = 0) int x, @Local(ordinal = 1) int y) {
+    @Inject(method = "initGui", at = @At("TAIL"))
+    private void addSearchAllButton(CallbackInfo ci) {
         if (!ChestTrackerConfig.INSTANCE.instance().compatibility.litematica.materialListSearchButtons) return;
 
-        x += StringUtils.getStringWidth(this.exportType.getDisplayName()) + 10 + 1;
-
-        ButtonGeneric searchButton = new ButtonGeneric(x, y, -1, 20,
+        // right-anchored, left of the info icon: no dependency on litematica's
+        // internal button layout, which shifts between versions
+        ButtonGeneric searchButton = new ButtonGeneric(this.width - 170, 10, -1, 20,
                 StringUtils.translate("chesttracker.compatibility.litematica.searchMissing"),
                 StringUtils.translate("chesttracker.title"));
 

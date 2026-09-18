@@ -30,6 +30,10 @@ public class CMSyncSettings {
     public boolean paused = false;
     public int intervalSeconds = DEFAULT_INTERVAL_SECONDS;
     public boolean syncEnderChest = true;
+    /** Also sync container custom names (chesttracker-specific metadata). */
+    public boolean syncContainerNames = true;
+    /** Show chat notification when a sync cycle completes (push+pull). */
+    public boolean chatNotifications = true;
     /** Last wipe generation seen from the server. A newer generation clears locals. */
     public int generation = 0;
     /** Teammate uuid -> last seen name (for ender chest profiles). Refreshed on every pull. */
@@ -74,6 +78,8 @@ public class CMSyncSettings {
             if (o.has("paused")) st.paused = o.get("paused").getAsBoolean();
             if (o.has("intervalSeconds")) st.intervalSeconds = o.get("intervalSeconds").getAsInt();
             if (o.has("syncEnderChest")) st.syncEnderChest = o.get("syncEnderChest").getAsBoolean();
+            if (o.has("syncContainerNames")) st.syncContainerNames = o.get("syncContainerNames").getAsBoolean();
+            if (o.has("chatNotifications")) st.chatNotifications = o.get("chatNotifications").getAsBoolean();
             try {
                 if (o.has("generation") && !o.get("generation").isJsonNull())
                     st.generation = o.get("generation").getAsInt();
@@ -104,6 +110,8 @@ public class CMSyncSettings {
             o.addProperty("paused", paused);
             o.addProperty("intervalSeconds", intervalSeconds);
             o.addProperty("syncEnderChest", syncEnderChest);
+            o.addProperty("syncContainerNames", syncContainerNames);
+            o.addProperty("chatNotifications", chatNotifications);
             o.addProperty("generation", generation);
             JsonObject owners = new JsonObject();
             for (var e : ownerNames.entrySet()) owners.addProperty(e.getKey(), e.getValue());
