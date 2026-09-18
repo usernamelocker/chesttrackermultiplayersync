@@ -63,6 +63,19 @@ public final class EnderChestKeys {
                 || path.startsWith("skyblock_ender_chest/"));
     }
 
+    /**
+     * Exact legacy shared keys (pre-per-player era). Fully hidden: the migration
+     * absorbs them into the owner's key on load, the viewer skips them, readers
+     * ignore them, and sync neither sends nor applies them.
+     */
+    public static boolean isHiddenLegacyKey(Identifier key) {
+        return key.equals(CommonKeys.ENDER_CHEST_KEY)
+                || key.equals(HypixelProvider.SKYBLOCK_ENDER_CHEST)
+                || key.equals(HypixelProvider.SKYBLOCK_BACKBACKS)
+                || key.equals(HypixelProvider.SKYBLOCK_SACKS)
+                || key.equals(HypixelProvider.SKYBLOCK_VAULT);
+    }
+
     /** Keys the ender-chest sync toggle covers (profiles + legacy + share-mod compat). */
     public static boolean isSyncableEnderKey(Identifier key) {
         return isProfileKey(key) || key.equals(CommonKeys.SHARE_ENDER_CHEST);
@@ -118,20 +131,16 @@ public final class EnderChestKeys {
 
     /** Own ender chest contents for integrations (preview, material lists). */
     public static Optional<MemoryKey> getOwn(MemoryBank bank) {
-        Optional<MemoryKey> own = bank.getKey(ownKey());
-        if (own.isPresent() && !own.get().isEmpty()) return own;
-        return bank.getKey(CommonKeys.ENDER_CHEST_KEY).filter(key -> !key.isEmpty());
+        return bank.getKey(ownKey()).filter(key -> !key.isEmpty());
     }
 
-    /** Own ender chest contents across current + legacy keys (migration-safe totals). */
+    /** Own ender chest contents (own key only — migration absorbs legacy on load). */
     public static List<net.minecraft.world.item.ItemStack> getOwnCounts(MemoryBank bank,
                                                                          CountingPredicate predicate,
                                                                          StackMergeMode stackMergeMode,
                                                                          boolean unpackNested) {
         List<net.minecraft.world.item.ItemStack> out = new ArrayList<>();
         bank.getKey(ownKey()).ifPresent(key -> out.addAll(key.getCounts(predicate, stackMergeMode, unpackNested)));
-        bank.getKey(CommonKeys.ENDER_CHEST_KEY)
-                .ifPresent(key -> out.addAll(key.getCounts(predicate, stackMergeMode, unpackNested)));
         return out;
     }
 }

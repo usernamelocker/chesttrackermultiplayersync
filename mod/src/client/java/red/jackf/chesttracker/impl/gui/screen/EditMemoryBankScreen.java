@@ -271,6 +271,7 @@ public class EditMemoryBankScreen extends BaseUtilScreen {
             selectorOptions.put(SettingsTab.MANAGE, translatable("chesttracker.gui.editMemoryBank.manage"));
         selectorOptions.put(SettingsTab.SEARCH, translatable("chesttracker.gui.editMemoryBank.search"));
         selectorOptions.put(SettingsTab.CMSYNC, translatable("chesttracker.gui.editMemoryBank.cmsync"));
+        selectorOptions.put(SettingsTab.CMSETTINGS, translatable("chesttracker.gui.editMemoryBank.cmsettings"));
         selectorOptions.put(SettingsTab.EMPTY, CommonComponents.EMPTY);
 
         settingsTabSelector.setOptions(selectorOptions);
@@ -281,6 +282,7 @@ public class EditMemoryBankScreen extends BaseUtilScreen {
         if (isCurrentLoaded) setupManagementSettings();
         setupSearchSettings();
         setupCMSyncSettings();
+        setupCMSettingsSettings();
 
         addSetting(new StringWidget(getSettingsX(0),
                                     getSettingsY(0),
@@ -763,6 +765,105 @@ public class EditMemoryBankScreen extends BaseUtilScreen {
         addSetting(stopButton, SettingsTab.CMSYNC);
     }
 
+    ////////////////
+    // CMSETTINGS //
+    ////////////////
+    // Advanced sync settings: interval, ender chest toggle, container names, chat notifications
+
+    private void setupCMSettingsSettings() {
+        var font = Minecraft.getInstance().font;
+        CMSyncSettings settings = CMSyncSettings.load(this.memoryBank.id());
+
+        // row 0: section header
+        addSetting(new StringWidget(getSettingsX(0),
+                                    getSettingsY(0),
+                                    getSettingsWidth(2),
+                                    BUTTON_HEIGHT,
+                                    translatable("chesttracker.gui.editMemoryBank.cmsettings.desc"),
+                                    font), SettingsTab.CMSETTINGS);
+
+        // row 1: sync interval
+        var intervalLabel = new StringWidget(getSettingsX(0),
+                                             getSettingsY(1),
+                                             getSettingsWidth(1),
+                                             BUTTON_HEIGHT,
+                                             translatable("chesttracker.gui.editMemoryBank.cmsync.interval"),
+                                             font);
+        addSetting(intervalLabel, SettingsTab.CMSETTINGS);
+
+        var intervalBox = new CustomEditBox(font,
+                                            getSettingsX(1),
+                                            getSettingsY(1),
+                                            getSettingsWidth(1),
+                                            BUTTON_HEIGHT,
+                                            null,
+                                            CommonComponents.EMPTY);
+        intervalBox.setMaxLength(4);
+        intervalBox.setValue(String.valueOf(settings.intervalSeconds));
+        intervalBox.addFormatter((text, cursor) -> FormattedCharSequence.forward(
+                text.replaceAll("[^0-9]", ""), Style.EMPTY));
+        intervalBox.setResponder(s -> {
+            try {
+                int val = Integer.parseInt(s);
+                if (val >= 2 && val <= 3600) {
+                    CMSyncSettings ss = CMSyncSettings.load(this.memoryBank.id());
+                    ss.intervalSeconds = val;
+                    ss.save(this.memoryBank.id());
+                }
+            } catch (NumberFormatException ignored) {
+            }
+        });
+        addSetting(intervalBox, SettingsTab.CMSETTINGS);
+
+        // row 2: sync ender chest
+        var syncEnderButton = Button.builder(
+                toggleMessage("chesttracker.gui.editMemoryBank.cmsync.syncEnder", settings.syncEnderChest),
+                b -> {
+                    CMSyncSettings ss = CMSyncSettings.load(this.memoryBank.id());
+                    ss.syncEnderChest = !ss.syncEnderChest;
+                    ss.save(this.memoryBank.id());
+                    b.setMessage(toggleMessage("chesttracker.gui.editMemoryBank.cmsync.syncEnder", ss.syncEnderChest));
+                })
+                .tooltip(Tooltip.create(translatable("chesttracker.gui.editMemoryBank.cmsync.syncEnder.tooltip")))
+                .bounds(getSettingsX(0), getSettingsY(2), getSettingsWidth(2), BUTTON_HEIGHT)
+                .build();
+        addSetting(syncEnderButton, SettingsTab.CMSETTINGS);
+
+        // row 3: sync container names
+        var syncNamesButton = Button.builder(
+                toggleMessage("chesttracker.gui.editMemoryBank.cmsync.syncNames", settings.syncContainerNames),
+                b -> {
+                    CMSyncSettings ss = CMSyncSettings.load(this.memoryBank.id());
+                    ss.syncContainerNames = !ss.syncContainerNames;
+                    ss.save(this.memoryBank.id());
+                    b.setMessage(toggleMessage("chesttracker.gui.editMemoryBank.cmsync.syncNames", ss.syncContainerNames));
+                })
+                .tooltip(Tooltip.create(translatable("chesttracker.gui.editMemoryBank.cmsync.syncNames.tooltip")))
+                .bounds(getSettingsX(0), getSettingsY(3), getSettingsWidth(2), BUTTON_HEIGHT)
+                .build();
+        addSetting(syncNamesButton, SettingsTab.CMSETTINGS);
+
+        // row 4: chat notifications
+        var chatNotifButton = Button.builder(
+                toggleMessage("chesttracker.gui.editMemoryBank.cmsync.chatNotifications", settings.chatNotifications),
+                b -> {
+                    CMSyncSettings ss = CMSyncSettings.load(this.memoryBank.id());
+                    ss.chatNotifications = !ss.chatNotifications;
+                    ss.save(this.memoryBank.id());
+                    b.setMessage(toggleMessage("chesttracker.gui.editMemoryBank.cmsync.chatNotifications", ss.chatNotifications));
+                })
+                .tooltip(Tooltip.create(translatable("chesttracker.gui.editMemoryBank.cmsync.chatNotifications.tooltip")))
+                .bounds(getSettingsX(0), getSettingsY(4), getSettingsWidth(2), BUTTON_HEIGHT)
+                .build();
+        addSetting(chatNotifButton, SettingsTab.CMSETTINGS);
+    }
+
+    /** "Label: Enabled/Disabled" for CMSETTINGS toggle buttons. */
+    private static Component toggleMessage(String labelKey, boolean on) {
+        return translatable(labelKey).append(": ")
+                .append(translatable(on ? "gui.enabled" : "gui.disabled"));
+    }
+
     private Component cmsyncStateText(CMSyncSettings settings) {
         if (settings.isActive())
             return translatable("chesttracker.gui.editMemoryBank.cmsync.state.active").withStyle(ChatFormatting.GREEN);
@@ -994,6 +1095,7 @@ public class EditMemoryBankScreen extends BaseUtilScreen {
         MANAGE,
         SEARCH,
         CMSYNC,
+        CMSETTINGS,
         EMPTY
     }
 }
