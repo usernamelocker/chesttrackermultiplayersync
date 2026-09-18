@@ -51,7 +51,7 @@ public class CMSyncCommand {
     private static CMSyncHttp.Identity wipeIdentity(FabricClientCommandSource source, Coordinate coord) {
         return new CMSyncHttp.Identity(source.getPlayer().getUUID().toString(),
                 source.getPlayer().getName().getString(),
-                coord.id(), coord.userFriendlyName(),
+                CMSyncManager.canonicalWireId(coord.id()), coord.userFriendlyName(),
                 gameVersion(), CMSyncManager.MOD_VERSION);
     }
 
