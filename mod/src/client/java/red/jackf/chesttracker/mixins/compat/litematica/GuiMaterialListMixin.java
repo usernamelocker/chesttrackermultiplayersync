@@ -41,7 +41,7 @@ public abstract class GuiMaterialListMixin extends GuiListBase<MaterialListEntry
 
 @Inject(method = "initGui", at = @At("TAIL"))
     private void addSearchAllButton(CallbackInfo ci) {
-        if (!ChestTrackerConfig.INSTANCE.instance().compatibility.litematica.materialListSearchButtons) return.
+        if (!ChestTrackerConfig.INSTANCE.instance().compatibility.litematica.materialListSearchButtons) return;
 
         // right-anchored, left of the info icon: no dependency on litematica's
         // internal button layout, which shifts between versions
