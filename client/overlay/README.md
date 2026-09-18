@@ -12,9 +12,9 @@ reference; `mod/src/.../impl/cmsync/` is what ships.
   Memory Bank menu (token box masked).
 * `impl/memory/EnderChestKeys.java` — per-player ender chest keys + migration.
 * Recording: ender chest + hypixel personal keys namespaced per player UUID.
-* `ChestTrackerScreen` — ender chest profiles (one icon + per-player buttons).
-* `EditMemoryBankScreen` — CMSync tab (URL/token/connect/stop); QMSync tab kept
-  for the website system, relabeled.
+* `ChestTrackerScreen` — ender chest dropdown with per-player head profiles.
+* `EditMemoryBankScreen` — single Sync tab (URL/masked token/connect/pause/stop);
+  website tab removed, `/qmsync` command deregistered.
 * `FilteringSettings.manualMode` defaults to false (auto-record).
 * `MemoryBankAccessImpl` — runs the ender chest migration on load.
 
