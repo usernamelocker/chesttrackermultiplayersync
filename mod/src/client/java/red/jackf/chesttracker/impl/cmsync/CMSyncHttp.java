@@ -24,8 +24,8 @@ import java.util.concurrent.CompletableFuture;
 public class CMSyncHttp {
     public static final int PROTOCOL_VERSION = 2;
     private static final Gson GSON = new Gson();
-    private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(5);
-    private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(15);
+    private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
+    private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(30);
 
     private static final HttpClient CLIENT = HttpClient.newBuilder()
             .connectTimeout(CONNECT_TIMEOUT)
@@ -57,7 +57,7 @@ public class CMSyncHttp {
         }
     }
 
-    public record PushOutcome(Result result, String note, int containers) {
+    public record PushOutcome(Result result, String note, int containers, int statusCode, long tookMs) {
     }
 
     public record PullOutcome(Result result, List<JsonObject> changes, List<JsonObject> tombstones,
@@ -112,9 +112,12 @@ public class CMSyncHttp {
         HttpRequest req = base(baseUrl, "/api/push", token)
                 .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(body), StandardCharsets.UTF_8))
                 .build();
+        final long start = System.currentTimeMillis();
         return CLIENT.sendAsync(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
                 .thenApply(resp -> {
                     Result r = classify(resp);
+                    long took = System.currentTimeMillis() - start;
+                    int code = resp.statusCode();
                     String note = "";
                     int containers = -1;
                     try {
@@ -139,9 +142,10 @@ public class CMSyncHttp {
                         }
                     } catch (RuntimeException ignored) {
                     }
-                    return new PushOutcome(r, note, containers);
+                    return new PushOutcome(r, note, containers, code, took);
                 })
-                .exceptionally(t -> new PushOutcome(classifyError(t), t.getMessage(), -1));
+                .exceptionally(t -> new PushOutcome(classifyError(t), t.getMessage(), -1, -1,
+                        System.currentTimeMillis() - start));
     }
 
     public static CompletableFuture<PullOutcome> pull(String baseUrl, String token, String serverId, String playerUuid,

@@ -46,7 +46,7 @@ import java.util.*;
  */
 public class CMSyncManager {
     public static final CMSyncManager INSTANCE = new CMSyncManager();
-    public static final String MOD_VERSION = "cmsync.3";
+    public static final String MOD_VERSION = "cmsync.4";
     private static final Logger LOGGER = ChestTracker.getLogger("CMSync");
 
     private static final double MAX_DELETE_FRACTION = 0.20;
@@ -62,9 +62,14 @@ public class CMSyncManager {
     @Nullable private String deterministicNote = null;
     private long deterministicUntilMs = 0;
     private static final long DETERMINISTIC_COOLDOWN_MS = 5 * 60 * 1000L;
+    // consecutive transport failures back off quietly (5s doubling to 60s) so one
+    // hiccup doesn't turn into a full-push-every-5s storm against a slow server
+    private int consecutiveConnFails = 0;
+    private long quietUntilMs = 0;
 
     @Nullable private Instant lastSuccess = null;
     @Nullable private String lastResult = null;
+    @Nullable private String lastDetail = null;
 
     private CMSyncManager() {
     }
@@ -93,6 +98,11 @@ public class CMSyncManager {
 
     public Optional<String> getLastResult() {
         return Optional.ofNullable(lastResult);
+    }
+
+    /** Free-text detail of the last push attempt (HTTP code, duration, sizes). */
+    public Optional<String> getLastDetail() {
+        return Optional.ofNullable(lastDetail);
     }
 
     /** Teammate uuids -> last seen names for ender chest profiles (sidecar cache + live player). */
@@ -124,8 +134,11 @@ public class CMSyncManager {
         this.lastAttemptMs = 0;
         this.deterministicNote = null;
         this.deterministicUntilMs = 0;
+        this.consecutiveConnFails = 0;
+        this.quietUntilMs = 0;
         this.lastSuccess = null;
         this.lastResult = null;
+        this.lastDetail = null;
     }
 
     /** Client thread: fast guards + fast copy only. */
@@ -155,6 +168,8 @@ public class CMSyncManager {
         if (now - lastAttemptMs < Math.max(2, settings.intervalSeconds) * 1000L) return;
         // deterministic rejection cooling down: stay quiet, don't burn the lane
         if (now < deterministicUntilMs) return;
+        // backing off after transport failures: stay quiet, don't burn the lane
+        if (now < quietUntilMs) return;
         // queue lane: if network busy, skip this tick (coalesce) — keeps FPS smooth
         if (!CMSyncQueue.tryClaim()) return;
         lastAttemptMs = now;
@@ -294,6 +309,10 @@ public class CMSyncManager {
         try {
             if (dirty && !emptyLocal) {
                 CMSyncHttp.PushOutcome push = CMSyncHttp.push(url, token, ident, prevHash, fullHash, changes).join();
+                if (push.tookMs() > 10_000) {
+                    LOGGER.warn("cmsync slow push: {} containers took {}ms (HTTP {})",
+                            changes.size(), push.tookMs(), push.statusCode());
+                }
                 // deterministic rejections would fail identically on every retry —
                 // handle separately (one message + cooldown) instead of the flap loop
                 if (push.result() == CMSyncHttp.Result.VALIDATION_ERROR
@@ -305,7 +324,7 @@ public class CMSyncManager {
                 }
                 client.execute(() -> handlePushResult(client, bankId, push.result(),
                         push.result() == CMSyncHttp.Result.SYNCED ? fullHash : prevHash,
-                        false, push.note(), changes.size()));
+                        false, push.note(), changes.size(), push.statusCode(), push.tookMs()));
                 if (push.result() == CMSyncHttp.Result.QUARANTINED) {
                     doPullBlocking(client, bankId, url, token, playerUuid, serverId, playerName, serverName, mcVersion, playerPos, dim);
                     return;
@@ -320,7 +339,7 @@ public class CMSyncManager {
         } catch (RuntimeException ex) {
             LOGGER.error("cmsync job failed", ex);
             client.execute(() -> handlePushResult(client, bankId,
-                    CMSyncHttp.Result.CONNECTION_FAILED, prevHash, false, "", lastPushedCount));
+                    CMSyncHttp.Result.CONNECTION_FAILED, prevHash, false, "", lastPushedCount, -1, 0));
         }
     }
 
@@ -353,6 +372,8 @@ public class CMSyncManager {
                     }
                     if (changed) s.save(bankId);
                 }
+                consecutiveConnFails = 0;
+                quietUntilMs = 0;
                 lastSuccess = Instant.now();
                 lastResult = "synced";
                 if (failing) {
@@ -361,6 +382,11 @@ public class CMSyncManager {
                 }
             } else {
                 lastResult = f.result().name();
+                if (f.result() == CMSyncHttp.Result.CONNECTION_FAILED) {
+                    consecutiveConnFails++;
+                    quietUntilMs = System.currentTimeMillis()
+                            + Math.min(60_000L, 5_000L << Math.min(consecutiveConnFails - 1, 3));
+                }
                 if (!failing) {
                     failing = true;
                     sendChat(client, Component.literal("CMSync pull failed: " + f.result()), ChatFormatting.RED);
@@ -509,7 +535,10 @@ public class CMSyncManager {
     private void handleDeterministic(Minecraft client, String bankId, String note) {
         if (!bankId.equals(activeBankId)) return;
         this.failing = false;
+        this.consecutiveConnFails = 0;
+        this.quietUntilMs = 0;
         this.lastResult = "rejected: " + note;
+        this.lastDetail = note;
         if (!note.equals(deterministicNote)) {
             this.deterministicNote = note;
             sendChat(client, Component.literal("CMSync push rejected by server: " + note), ChatFormatting.RED);
@@ -520,8 +549,10 @@ public class CMSyncManager {
     }
 
     private void handlePushResult(Minecraft client, String bankId, CMSyncHttp.Result r,
-                                  @Nullable String hash, boolean skipped, String note, int pushedCount) {
+                                  @Nullable String hash, boolean skipped, String note, int pushedCount,
+                                  int statusCode, long tookMs) {
         if (!bankId.equals(activeBankId)) return;
+        this.lastDetail = pushDetail(r, statusCode, tookMs, pushedCount);
         if (r == CMSyncHttp.Result.SYNCED) {
             if (!skipped) {
                 lastPushHash = hash;
@@ -531,15 +562,27 @@ public class CMSyncManager {
             }
             deterministicNote = null;
             deterministicUntilMs = 0;
+            consecutiveConnFails = 0;
+            quietUntilMs = 0;
             if (failing) {
                 failing = false;
                 sendChat(client, Component.literal("CMSync re-established"), ChatFormatting.GREEN);
             }
         } else if (r == CMSyncHttp.Result.QUARANTINED) {
             lastResult = "quarantined";
+            consecutiveConnFails = 0;
+            quietUntilMs = 0;
             sendChat(client, Component.literal("CMSync held mass-delete: " + note), ChatFormatting.YELLOW);
         } else {
             lastResult = r.name();
+            if (r == CMSyncHttp.Result.CONNECTION_FAILED) {
+                consecutiveConnFails++;
+                quietUntilMs = System.currentTimeMillis()
+                        + Math.min(60_000L, 5_000L << Math.min(consecutiveConnFails - 1, 3));
+            } else {
+                consecutiveConnFails = 0;
+                quietUntilMs = 0;
+            }
             if (!failing) {
                 failing = true;
                 sendChat(client, Component.literal("CMSync push failed: " + r), ChatFormatting.RED);
@@ -547,9 +590,19 @@ public class CMSyncManager {
         }
     }
 
+    private static String pushDetail(CMSyncHttp.Result r, int statusCode, long tookMs, int pushedCount) {
+        if (r == CMSyncHttp.Result.SYNCED)
+            return "push HTTP " + statusCode + " in " + tookMs + "ms, " + pushedCount + " containers";
+        if (statusCode > 0) return "push HTTP " + statusCode + " (" + r + ")";
+        return "push failed: " + r + (tookMs > 0 ? " after " + tookMs + "ms" : "");
+    }
+
     private void handlePullError(Minecraft client, String bankId) {
         if (!bankId.equals(activeBankId)) return;
         lastResult = "connection failed";
+        consecutiveConnFails++;
+        quietUntilMs = System.currentTimeMillis()
+                + Math.min(60_000L, 5_000L << Math.min(consecutiveConnFails - 1, 3));
         if (!failing) {
             failing = true;
             sendChat(client, Component.literal("CMSync connection failed"), ChatFormatting.RED);

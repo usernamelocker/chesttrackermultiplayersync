@@ -78,6 +78,8 @@ public class CMSyncCommand {
                         + CMSyncManager.INSTANCE.getLastResult().orElse("?") + ")").withStyle(ChatFormatting.GREEN)),
                 () -> source.sendFeedback(Component.literal("never synced ("
                         + CMSyncManager.INSTANCE.getLastResult().orElse("-") + ")").withStyle(ChatFormatting.YELLOW)));
+        CMSyncManager.INSTANCE.getLastDetail().ifPresent(d ->
+                source.sendFeedback(Component.literal(d).withStyle(ChatFormatting.GRAY)));
         int containers = bank.getMemories().values().stream().mapToInt(k -> k.getMemories().size()).sum();
         source.sendFeedback(Component.literal("local containers: " + containers + " in "
                 + bank.getMemories().size() + " keys").withStyle(ChatFormatting.GRAY));
