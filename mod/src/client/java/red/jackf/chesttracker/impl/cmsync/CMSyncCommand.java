@@ -35,7 +35,7 @@ public class CMSyncCommand {
     }
 
     private static int help(FabricClientCommandSource source) {
-        source.sendFeedback(Component.literal("CMSync: connect in the Memory Bank menu (CMSync tab) | /cmsync status | /cmsync stop | /cmsync wipealldata")
+        source.sendFeedback(Component.literal("CMSync: connect in the Memory Bank menu (CMSync tab) | /cmsync status | /cmsync stop | /cmsync wipealldata (admin token from CM Settings)")
                 .withStyle(ChatFormatting.GRAY));
         return 1;
     }
@@ -55,6 +55,15 @@ public class CMSyncCommand {
                 gameVersion(), CMSyncManager.MOD_VERSION);
     }
 
+    /**
+     * /api/wipe needs the ADMIN_TOKEN, which lives in its own CM Settings field —
+     * the sync token only works when the server runs a shared admin token.
+     */
+    private static String wipeToken(CMSyncSettings s) {
+        if (s.adminToken != null && !s.adminToken.isBlank()) return s.adminToken.strip();
+        return s.token;
+    }
+
     private static int wipeStep1(FabricClientCommandSource source) {
         Optional<MemoryBankImpl> bankOpt = MemoryBankAccessImpl.INSTANCE.getLoadedInternal();
         Optional<Coordinate> coordOpt = Coordinate.getCurrent();
@@ -68,11 +77,15 @@ public class CMSyncCommand {
             return 0;
         }
         final String url = s.url;
-        final String token = s.token;
+        final String token = wipeToken(s);
         CMSyncHttp.Identity ident = wipeIdentity(source, coordOpt.get());
+        CMSyncLog.log("wipe", "step1 challenge requested by " + source.getPlayer().getName().getString());
         CMSyncHttp.wipe(url, token, ident, false, null).whenComplete((out, throwable) ->
                 source.getClient().execute(() -> {
                     if (throwable != null || out.result() != CMSyncHttp.Result.CONFIRM_REQUIRED) {
+                        CMSyncLog.log("wipe", "step1 aborted: "
+                                + (throwable != null ? CMSyncLog.trunc(throwable.getMessage(), 160)
+                                : out.result() + " " + out.detail()));
                         source.sendError(Component.literal("Wipe aborted: "
                                 + (throwable != null ? "connection failed" : out.result() + " " + out.detail())));
                         return;
@@ -103,12 +116,16 @@ public class CMSyncCommand {
         }
         final String bankId = bankOpt.get().getId();
         final String url = s.url;
-        final String token = s.token;
+        final String token = wipeToken(s);
         CMSyncHttp.Identity ident = wipeIdentity(source, coordOpt.get());
+        CMSyncLog.log("wipe", "step2 confirm by " + source.getPlayer().getName().getString());
         CMSyncHttp.wipe(url, token, ident, false, null).whenComplete((first, throwable) ->
                 source.getClient().execute(() -> {
                     if (throwable != null || first.result() != CMSyncHttp.Result.CONFIRM_REQUIRED
                             || first.challenge() == null) {
+                        CMSyncLog.log("wipe", "step2 challenge FAILED: "
+                                + (throwable != null ? CMSyncLog.trunc(throwable.getMessage(), 160)
+                                : String.valueOf(first.result())));
                         source.sendError(Component.literal("Wipe aborted: "
                                 + (throwable != null ? "connection failed" : first.result())));
                         return;
@@ -116,10 +133,14 @@ public class CMSyncCommand {
                     CMSyncHttp.wipe(url, token, ident, true, first.challenge()).whenComplete((out, throwable2) ->
                             source.getClient().execute(() -> {
                                 if (throwable2 != null || out.result() != CMSyncHttp.Result.WIPED) {
+                                    CMSyncLog.log("wipe", "step2 confirm FAILED: "
+                                            + (throwable2 != null ? CMSyncLog.trunc(throwable2.getMessage(), 160)
+                                            : String.valueOf(out.result())));
                                     source.sendError(Component.literal("Wipe failed: "
                                             + (throwable2 != null ? "connection failed" : out.result())));
                                     return;
                                 }
+                                CMSyncLog.log("wipe", "WIPED generation=" + out.generation());
                                 CMSyncManager.INSTANCE.applyServerGeneration(bankId, out.generation());
                                 source.sendFeedback(Component.literal("Wiped shared data to zero (generation "
                                         + out.generation() + "). Local data cleared; fresh start.")

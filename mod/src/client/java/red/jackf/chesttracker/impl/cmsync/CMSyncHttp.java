@@ -64,7 +64,7 @@ public class CMSyncHttp {
     public record PushOutcome(Result result, String note, int containers, int statusCode, long tookMs) {
     }
 
-    public record HandshakeOutcome(Result result, int generation) {
+    public record HandshakeOutcome(Result result, int generation, String note) {
     }
 
     public record WipeOutcome(Result result, String detail, int generation, int containers,
@@ -72,7 +72,7 @@ public class CMSyncHttp {
     }
 
     public record PullOutcome(Result result, List<JsonObject> changes, List<JsonObject> tombstones,
-                                int containers, Map<String, String> owners, int generation) {
+                                int containers, Map<String, String> owners, int generation, String note) {
     }
 
     private CMSyncHttp() {
@@ -84,11 +84,18 @@ public class CMSyncHttp {
         // tolerance: players type "host:port" without scheme into the GUI box —
         // assume http rather than dead-ending on "bad URL"
         if (!s.contains("://")) s = "http://" + s;
+        // repair single-slash typos ("http:/host" -> "http://host")
+        s = s.replaceFirst("^(https?):/(?!/)", "$1://");
         try {
             URI uri = URI.create(s);
             if (uri.getScheme() == null || !(uri.getScheme().equals("http") || uri.getScheme().equals("https")))
                 return null;
             if (uri.getHost() == null) return null;
+            // reject accidental hosts ("http" from "http:/foo" typos): real hosts are
+            // dotted, IPs, or localhost
+            String host = uri.getHost();
+            if (!host.contains(".") && !host.contains(":") && !host.equalsIgnoreCase("localhost"))
+                return null;
             return uri;
         } catch (IllegalArgumentException e) {
             return null;
@@ -113,15 +120,18 @@ public class CMSyncHttp {
                 .thenApply(resp -> {
                     Result r = classify(resp);
                     int generation = -1;
+                    String note = "";
                     try {
                         JsonObject o = JsonParser.parseString(resp.body()).getAsJsonObject();
                         if (o.has("generation") && !o.get("generation").isJsonNull())
                             generation = o.get("generation").getAsInt();
+                        if (o.has("reason") && !o.get("reason").isJsonNull())
+                            note = o.get("reason").getAsString();
                     } catch (RuntimeException ignored) {
                     }
-                    return new HandshakeOutcome(r, generation);
+                    return new HandshakeOutcome(r, generation, note);
                 })
-                .exceptionally(t -> new HandshakeOutcome(classifyError(t), -1));
+                .exceptionally(t -> new HandshakeOutcome(classifyError(t), -1, errorMessage(t)));
     }
 
     public static CompletableFuture<PushOutcome> push(String baseUrl, String token, Identity ident,
@@ -165,7 +175,7 @@ public class CMSyncHttp {
                     }
                     return new PushOutcome(r, note, containers, code, took);
                 })
-                .exceptionally(t -> new PushOutcome(classifyError(t), t.getMessage(), -1, -1,
+                .exceptionally(t -> new PushOutcome(classifyError(t), errorMessage(t), -1, -1,
                         System.currentTimeMillis() - start));
     }
 
@@ -186,7 +196,7 @@ public class CMSyncHttp {
         return CLIENT.sendAsync(rb.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
                 .thenApply(resp -> {
                     Result r = classify(resp);
-                    if (r != Result.SYNCED) return new PullOutcome(r, List.of(), List.of(), -1, Map.of(), -1);
+                    if (r != Result.SYNCED) return new PullOutcome(r, List.of(), List.of(), -1, Map.of(), -1, "");
                     try {
                         JsonObject o = JsonParser.parseString(resp.body()).getAsJsonObject();
                         List<JsonObject> ch = new java.util.ArrayList<>();
@@ -209,12 +219,12 @@ public class CMSyncHttp {
                                 }
                             }
                         }
-                        return new PullOutcome(Result.SYNCED, ch, tb, c, owners, generation);
+                        return new PullOutcome(Result.SYNCED, ch, tb, c, owners, generation, "");
                     } catch (RuntimeException e) {
-                        return new PullOutcome(Result.NOT_A_CMSYNC_SERVER, List.of(), List.of(), -1, Map.of(), -1);
+                        return new PullOutcome(Result.NOT_A_CMSYNC_SERVER, List.of(), List.of(), -1, Map.of(), -1, "unreadable pull body");
                     }
                 })
-                .exceptionally(t -> new PullOutcome(classifyError(t), List.of(), List.of(), -1, Map.of(), -1));
+                .exceptionally(t -> new PullOutcome(classifyError(t), List.of(), List.of(), -1, Map.of(), -1, errorMessage(t)));
     }
 
     /**
@@ -260,8 +270,7 @@ public class CMSyncHttp {
                         return new WipeOutcome(classify(resp), "unreadable response", -1, -1, null);
                     }
                 })
-                .exceptionally(t -> new WipeOutcome(classifyError(t),
-                        t.getMessage() != null ? t.getMessage() : "connection failed", -1, -1, null));
+                .exceptionally(t -> new WipeOutcome(classifyError(t), errorMessage(t), -1, -1, null));
     }
 
     private static String detailOf(JsonObject o) {
@@ -313,5 +322,17 @@ public class CMSyncHttp {
                 return Result.CONNECTION_FAILED;
         }
         return Result.CONNECTION_FAILED;
+    }
+
+    /** First non-null message walking the cause chain (CompletionException itself is mute). */
+    static String errorMessage(Throwable t) {
+        for (Throwable c = t; c != null; c = c.getCause()) {
+            String m = c.getMessage();
+            if (m != null && !m.isBlank()) {
+                String name = c.getClass().getSimpleName();
+                return (name.isEmpty() ? "" : name + ": ") + CMSyncLog.trunc(m, 160);
+            }
+        }
+        return t == null ? "unknown transport error" : t.toString();
     }
 }
