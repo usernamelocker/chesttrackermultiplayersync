@@ -84,6 +84,8 @@ public class EditMemoryBankScreen extends BaseUtilScreen {
     @Nullable
     private Button cmsyncConnectButton = null;
     @Nullable
+    private Button cmsyncPauseButton = null;
+    @Nullable
     private StringWidget cmsyncStateLabel = null;
 
     private static int manageWorkingRange = 256;
@@ -742,9 +744,18 @@ public class EditMemoryBankScreen extends BaseUtilScreen {
                                                  font);
         addSetting(this.cmsyncStateLabel, SettingsTab.CMSYNC);
 
-        // row 4: stop (full width)
+        // row 4: pause/resume + stop. Pause keeps URL and token, stop forgets them.
+        CMSyncSettings initial = CMSyncSettings.load(this.memoryBank.id());
+        var pauseButton = Button.builder(cmsyncPauseLabel(initial), b -> cmsyncPauseResume())
+                                .tooltip(Tooltip.create(translatable("chesttracker.gui.editMemoryBank.cmsync.pause.tooltip")))
+                                .bounds(getSettingsX(0), getSettingsY(4), getSettingsWidth(1), BUTTON_HEIGHT)
+                                .build();
+        this.cmsyncPauseButton = pauseButton;
+        addSetting(pauseButton, SettingsTab.CMSYNC);
+
         var stopButton = Button.builder(translatable("chesttracker.gui.editMemoryBank.cmsync.stop"), this::cmsyncStop)
-                               .bounds(getSettingsX(0), getSettingsY(4), getSettingsWidth(2), BUTTON_HEIGHT)
+                               .tooltip(Tooltip.create(translatable("chesttracker.gui.editMemoryBank.cmsync.stop.tooltip")))
+                               .bounds(getSettingsX(1), getSettingsY(4), getSettingsWidth(1), BUTTON_HEIGHT)
                                .build();
         addSetting(stopButton, SettingsTab.CMSYNC);
     }
@@ -810,6 +821,7 @@ public class EditMemoryBankScreen extends BaseUtilScreen {
                         });
                         CMSyncManager.INSTANCE.applyServerGeneration(bankId, outcome.generation());
                         refreshCMSyncStateLabel();
+                        refreshCMSyncPauseButton();
                     } else if (this.cmsyncStateLabel != null) {
                         this.cmsyncStateLabel.setMessage(translatable(
                                 outcome.result() == CMSyncHttp.Result.ACCESS_DENIED
@@ -828,6 +840,26 @@ public class EditMemoryBankScreen extends BaseUtilScreen {
         if (this.cmsyncUrlBox != null) this.cmsyncUrlBox.setValue("");
         if (this.cmsyncTokenBox != null) this.cmsyncTokenBox.setValue("");
         refreshCMSyncStateLabel();
+        refreshCMSyncPauseButton();
+    }
+
+    private static Component cmsyncPauseLabel(CMSyncSettings settings) {
+        return translatable(settings.paused
+                ? "chesttracker.gui.editMemoryBank.cmsync.resume"
+                : "chesttracker.gui.editMemoryBank.cmsync.pause");
+    }
+
+    private void refreshCMSyncPauseButton() {
+        if (this.cmsyncPauseButton != null)
+            this.cmsyncPauseButton.setMessage(cmsyncPauseLabel(CMSyncSettings.load(this.memoryBank.id())));
+    }
+
+    private void cmsyncPauseResume() {
+        CMSyncSettings settings = CMSyncSettings.load(this.memoryBank.id());
+        settings.paused = !settings.paused;
+        settings.save(this.memoryBank.id());
+        refreshCMSyncStateLabel();
+        refreshCMSyncPauseButton();
     }
 
     private static String gameVersion() {
