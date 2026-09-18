@@ -35,17 +35,17 @@
   shulker/nested contents, container block+name) plus user overrides, inside `raw`.
   Same-MC-version peers restore everything; other versions get names+counts.
   No VPS change needed (server already stores raw opaquely). INSTALL THIS ONE.
-* Prerelease 6 (`cmsync-1.21.11-6`): Manual Mode OFF by default (auto-record);
-  CMSync tab in Memory Bank menu (URL + masked token + connect + stop), QMSync tab
-  relabeled Website; per-player ender chests (one icon + per-player profiles, own
-  migration); server 5k range gate on pulls (+tombstones) with ender exemption;
-  player-name owners for profiles. INSTALL THIS ONE (needs VPS redeploy too).
-* Native tab inside EditMemoryBankScreen (v1 uses standalone `/cmsync gui` screen instead — simpler, version-proof).
-* 26.1.2/26.2 branch builds (same overlay, see porting doc).
-* Live Portainer deploy (repo is on GitHub private; needs your 2 env vars + Deploy click).
+* Prerelease 7 (`cmsync-1.21.11-7`): ender dropdown with player-head profiles
+  (hover names, auto-close); quieter failures (5s-60s backoff, HTTP code + duration
+  in `/cmsync status`, slow-push warnings); timeouts 10s/30s.
+* Prerelease 8 (`cmsync-1.21.11-8`): broken/emptied chests propagate as tombstones;
+  `/cmsync wipealldata` two-step admin wipe with wipe generation (online clients
+  cleared, offline cleared on return, snapshots kept). Needs VPS redeploy.
+* Prerelease 9 (`cmsync-1.21.11-9`): mass breaks go straight through with one warning;
+  only an established bank reading completely empty holds (hub-wipe). Server quarantine
+  replaced by snapshot + warning log. INSTALL THIS ONE (needs VPS redeploy too).
 
-## Your 3 inputs needed to go live
+## Live state
 
-1. `/cmsync status` → exact `serverId` → Portainer env `EXPECTED_SERVER_ID`
-2. Friend UUIDs → Portainer env `WHITELIST_UUIDS`
-3. `http://VPS-IP:7000/health` → `{"ok":true}`, then connect from game
+* VPS: cmsync 2.3 expected (Update the `chest-tracker` stack after pushing).
+* 26.1.2 branch mirrors main's features (see `26.1.2` branch + `cmsync-26.1.2-*` releases).

@@ -249,12 +249,11 @@ def select_pull(con: sqlite3.Connection, server_id: str, player_dim: str | None 
         tombs.append(dict(r))
     return changes, tombs
 
-def should_quarantine_mass_delete(existing: int, delete_count: int,
-                                  max_fraction: float = 0.20, max_count: int = 50,
-                                  min_bank: int = 10) -> bool:
-    """Guard: propagate deletes, but not mass wipes. Empty server never quarantines,
-    and tiny banks (< min_bank) are exempt from the fraction rule so a new player
-    breaking their only chests isn't flagged — the absolute count rule still applies."""
+def mass_delete_detected(existing: int, delete_count: int,
+                           max_fraction: float = 0.20, max_count: int = 50,
+                           min_bank: int = 10) -> bool:
+    """True for wipe-sized delete bursts. Advisory only: callers snapshot + log,
+    then apply anyway (tiny banks exempt from the fraction rule)."""
     if existing <= 0 or delete_count <= 0:
         return False
     if delete_count >= max_count:
@@ -262,6 +261,11 @@ def should_quarantine_mass_delete(existing: int, delete_count: int,
     if existing < min_bank:
         return False
     return (delete_count / max(1, existing)) >= max_fraction
+
+
+def should_quarantine_mass_delete(*args, **kwargs) -> bool:
+    """Backward-compat alias (the quarantine itself was removed)."""
+    return mass_delete_detected(*args, **kwargs)
 
 def is_empty_hash_push(full_hash: str, changes: list) -> bool:
     # Client sends sha256("[]")-style empty marker when it has nothing; server double-checks.

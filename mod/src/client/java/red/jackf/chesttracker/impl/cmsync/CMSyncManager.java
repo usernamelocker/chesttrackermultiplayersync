@@ -46,11 +46,12 @@ import java.util.*;
  */
 public class CMSyncManager {
     public static final CMSyncManager INSTANCE = new CMSyncManager();
-    public static final String MOD_VERSION = "cmsync.5";
+    public static final String MOD_VERSION = "cmsync.6";
     private static final Logger LOGGER = ChestTracker.getLogger("CMSync");
-
-    private static final double MAX_DELETE_FRACTION = 0.20;
-    private static final int MAX_DELETE_COUNT = 50;
+    // Only an established bank reading completely empty is held (hub-wipe safety,
+    // needs 10+ previously pushed containers). Everything else pushes through;
+    // the server snapshots + logs mass deletes as backstop.
+    private static final int EMPTY_HOLD_MIN_BANK = 10;
 
     @Nullable private String activeBankId = null;
     @Nullable private String lastPushHash = null;
@@ -70,10 +71,8 @@ public class CMSyncManager {
     // Null = needs a baseline (fresh session or filter toggle), never a mass delete.
     @Nullable private Map<String, Set<String>> lastSnapshotKeys = null;
     @Nullable private Boolean lastSyncEnder = null;
-    private boolean heldNotified = false;
-    private int heldStreak = 0;
-    @Nullable private String heldSignature = null;
-    private static final int HOLD_TICKS = 12; // ~1 min of identical warnings, then push through
+    private boolean emptyHoldNotified = false;
+    @Nullable private String lastWarnedDeletes = null;
 
     @Nullable private Instant lastSuccess = null;
     @Nullable private String lastResult = null;
@@ -155,9 +154,8 @@ public class CMSyncManager {
         this.lastPushHash = null;
         this.lastSnapshotKeys = null;
         this.lastPushedCount = -1;
-        this.heldStreak = 0;
-        this.heldSignature = null;
-        this.heldNotified = false;
+        this.emptyHoldNotified = false;
+        this.lastWarnedDeletes = null;
         this.lastResult = "wiped to generation " + generation;
         return true;
     }
@@ -174,9 +172,8 @@ public class CMSyncManager {
         this.quietUntilMs = 0;
         this.lastSnapshotKeys = null;
         this.lastSyncEnder = null;
-        this.heldNotified = false;
-        this.heldStreak = 0;
-        this.heldSignature = null;
+        this.emptyHoldNotified = false;
+        this.lastWarnedDeletes = null;
         this.lastSuccess = null;
         this.lastResult = null;
         this.lastDetail = null;
@@ -365,43 +362,35 @@ public class CMSyncManager {
         final String prevHash = this.lastPushHash;
         final boolean dirty = this.failing || !fullHash.equals(prevHash);
 
-        // local mass-delete hold: warn first; a drop that stays identical for ~1 min
-        // pushes through (the user lived with the warning — e.g. legit reorganization).
-        // Empty banks never reach here (hub-wipe safety); server quarantine + snapshots
-        // backstop true accidents either way.
-        if (upsertCount > 0 && lastPushedCount > 0) {
-            int drop = lastPushedCount - upsertCount;
-            boolean mass = drop >= MAX_DELETE_COUNT
-                    || (lastPushedCount >= 10 && drop >= (int) (lastPushedCount * MAX_DELETE_FRACTION));
-            if (mass) {
-                if (!fullHash.equals(heldSignature)) {
-                    heldSignature = fullHash;
-                    heldStreak = 1;
-                    heldNotified = false;
-                } else {
-                    heldStreak++;
+        // hub-wipe hold: an established bank reading completely empty is never pushed —
+        // pull-only, so the team refills the view instead of a wipe propagating.
+        // (Tiny banks always propagate; a real fresh start uses /cmsync wipealldata.)
+        if (upsertCount == 0 && !deletedPairs.isEmpty() && lastPushedCount >= EMPTY_HOLD_MIN_BANK) {
+            client.execute(() -> {
+                if (!bankId.equals(activeBankId)) return;
+                lastResult = "held empty bank";
+                if (!emptyHoldNotified) {
+                    emptyHoldNotified = true;
+                    sendChat(client, Component.literal("CMSync holding: bank reads empty but had "
+                            + lastPushedCount + " containers — pull-only, nothing deleted. "
+                            + "To truly start over, use /cmsync wipealldata."), ChatFormatting.YELLOW);
                 }
-                if (heldStreak < HOLD_TICKS) {
-                    final int fDrop = drop;
-                    final int fNow = upsertCount;
-                    client.execute(() -> {
-                        if (!bankId.equals(activeBankId)) return;
-                        lastResult = "held local mass-delete";
-                        if (!heldNotified) {
-                            heldNotified = true;
-                            sendChat(client, Component.literal("CMSync held push: you lost " + fDrop
-                                    + " containers locally (last=" + lastPushedCount + " now=" + fNow
-                                    + "). Pushing through shortly unless you /cmsync stop."), ChatFormatting.YELLOW);
-                        }
-                    });
-                    // still pull so we don't go stale
-                    doPullBlocking(client, bankId, url, token, playerUuid, serverId, playerName, serverName, mcVersion, playerPos, dim);
-                    return;
-                }
-                heldStreak = 0;
-                heldSignature = null;
-                heldNotified = false;
-            }
+            });
+            doPullBlocking(client, bankId, url, token, playerUuid, serverId, playerName, serverName, mcVersion, playerPos, dim);
+            return;
+        }
+        emptyHoldNotified = false;
+
+        // everything else (including mass breaks) goes straight through with one warning
+        // per unique delete set; the server snapshots + logs mass deletes as backstop
+        if (!deletedPairs.isEmpty() && !fullHash.equals(lastWarnedDeletes)) {
+            lastWarnedDeletes = fullHash;
+            final int fGone = deletedPairs.size();
+            client.execute(() -> {
+                if (!bankId.equals(activeBankId)) return;
+                sendChat(client, Component.literal("CMSync syncing " + fGone
+                        + " removed container(s) to the team."), ChatFormatting.YELLOW);
+            });
         }
 
         CMSyncHttp.Identity ident = new CMSyncHttp.Identity(

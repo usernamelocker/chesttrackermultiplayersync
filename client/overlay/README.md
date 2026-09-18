@@ -27,5 +27,6 @@ Memory Bank menu → CMSync tab (URL + token → Connect), `/cmsync status`,
 
 * Only syncs on the bound `serverId` (hub joins ignored).
 * Empty local bank + non-empty server → push skipped, pull still runs (no hub-wipe).
-* Local mass-delete (>20% or >50) → push held, chat warning.
+* Broken/emptied containers propagate as tombstones (mass breaks go through with one
+  warning; an established bank reading empty holds pull-only — use wipe for fresh starts).
 * Deletes propagate as tombstones (30d TTL); pulls are range-gated (5k blocks).
