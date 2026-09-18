@@ -100,9 +100,12 @@ def handshake(req: HandshakeRequest, x_cmsync_token: str | None = Header(default
         raise HTTPException(400, "unsupported protocolVersion")
     sid = config.canonical_server_id(req.serverId)
     if config.EXPECTED_SERVER_ID and sid != config.EXPECTED_SERVER_ID:
+        _log.warning("handshake DENIED wrong-serverId player=%s got=%s want=%s",
+                     req.playerUuid, req.serverId, config.EXPECTED_SERVER_ID)
         return {"status": "ACCESS_DENIED", "reason": "wrong serverId"}
     denied = _gate(req.playerUuid, x_cmsync_token)
     if denied:
+        _log.warning("handshake DENIED %s player=%s", denied.get("reason"), req.playerUuid)
         return denied
     with _con() as con:
         return {"status": "SYNCED", "generation": db.get_generation(con, sid)}
@@ -164,9 +167,12 @@ def pull(serverId: str = Query(...), since: str | None = Query(default=None),
          x_cmsync_token: str | None = Header(default=None, alias="X-CMSync-Token")):
     sid = config.canonical_server_id(serverId)
     if config.EXPECTED_SERVER_ID and sid != config.EXPECTED_SERVER_ID:
+        _log.warning("pull DENIED wrong-serverId player=%s got=%s want=%s",
+                     playerUuid, serverId, config.EXPECTED_SERVER_ID)
         return {"status": "ACCESS_DENIED", "reason": "wrong serverId"}
     denied = _gate(playerUuid, x_cmsync_token)
     if denied:
+        _log.info("pull DENIED %s player=%s", denied.get("reason"), playerUuid)
         return denied
     with _con() as con:
         changes, tombs = db.select_pull(con, sid, dim, px, py, pz, config.RANGE_BLOCKS)
