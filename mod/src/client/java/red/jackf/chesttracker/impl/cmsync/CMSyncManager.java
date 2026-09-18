@@ -114,6 +114,15 @@ public class CMSyncManager {
         return Optional.ofNullable(lastDetail);
     }
 
+    /**
+     * Server id as sent on the wire (handshake/push/pull/wipe): lowercased.
+     * See the tick() comment — client libraries disagree on capitalisation per
+     * MC version, the server compares literally.
+     */
+    public static String canonicalWireId(String serverId) {
+        return serverId == null ? "" : serverId.toLowerCase(java.util.Locale.ROOT);
+    }
+
     /** Teammate uuids -> last seen names for ender chest profiles (sidecar cache + live player). */
     public Map<UUID, String> getOwnerNames(String bankId) {
         Map<UUID, String> out = new HashMap<>();
@@ -255,7 +264,12 @@ public class CMSyncManager {
         final String token = settings.token;
         final String playerUuid = client.player.getUUID().toString();
         final String playerName = client.player.getName().getString();
-        final String serverId = coord.id();
+        // Wire id, lowercased: 26.x reports e.g. multiplayer/Fabriccraft_net while
+        // 1.21.11 reports multiplayer/fabriccraft_net and the server compares
+        // literally — sending it raw ate ACCESS_DENIED every cycle on 26.x.
+        // Local bank binding keeps the exact spelling; only the wire is normalised.
+        // (No UI override needed: every spelling maps to the same id here.)
+        final String serverId = canonicalWireId(coord.id());
         final String serverName = coord.userFriendlyName();
         final String mcVersion = gameVersion();
         final DynamicOps<JsonElement> ops =
@@ -298,7 +312,7 @@ public class CMSyncManager {
             CMSyncLog.log("cycle", "snapshot copy FAILED: " + CMSyncLog.trunc(ex.getMessage(), 160));
             return;
         }
-        CMSyncLog.log("cycle", "bank=" + bankId + " snapshot=" + snapshot.size()
+        CMSyncLog.log("cycle", "bank=" + bankId + " server=" + serverId + " snapshot=" + snapshot.size()
                 + " deletes=" + deletedPairs.size() + (quietBypass ? " quiet-bypass" : ""));
 
         // ---- everything heavy runs on queue lane ----

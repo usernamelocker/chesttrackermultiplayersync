@@ -920,7 +920,7 @@ public class EditMemoryBankScreen extends BaseUtilScreen {
         final String tokenOrNull = token.isEmpty() ? null : token;
         var identity = new CMSyncHttp.Identity(player.getUUID().toString(),
                                                player.getName().getString(),
-                                               coordinate.get().id(),
+                                               CMSyncManager.canonicalWireId(coordinate.get().id()),
                                                coordinate.get().userFriendlyName(),
                                                gameVersion(),
                                                CMSyncManager.MOD_VERSION);
