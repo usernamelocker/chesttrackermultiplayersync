@@ -150,6 +150,32 @@ def prune_tombstones(con: sqlite3.Connection, ttl_days: int = 30) -> int:
     return cur.rowcount
 
 
+def get_generation(con: sqlite3.Connection, server_id: str) -> int:
+    """Wipe generation: bumped on every wipe. Clients holding an older generation
+    clear their local banks on next contact (catches offline players too)."""
+    row = con.execute("SELECT v FROM meta WHERE k=?", (f"gen:{server_id}",)).fetchone()
+    try:
+        return int(row["v"]) if row else 0
+    except (ValueError, TypeError):
+        return 0
+
+
+def wipe_server(con: sqlite3.Connection, server_id: str, keep_snapshots: bool = True) -> dict:
+    """Delete memories, tombstones and owners; snapshot first; bump generation.
+    Snapshots are kept as the recovery path (pass keep_snapshots=False to nuke all)."""
+    snap_id = take_snapshot(con, server_id)
+    mem = con.execute("DELETE FROM memories WHERE server_id=?", (server_id,)).rowcount
+    tomb = con.execute("DELETE FROM tombstones WHERE server_id=?", (server_id,)).rowcount
+    own = con.execute("DELETE FROM key_owners WHERE server_id=?", (server_id,)).rowcount
+    if not keep_snapshots:
+        con.execute("DELETE FROM snapshots WHERE server_id=?", (server_id,))
+    con.execute("INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)",
+                (f"gen:{server_id}", str(get_generation(con, server_id) + 1)))
+    con.commit()
+    return {"memories": mem, "tombstones": tomb, "owners": own,
+            "snapshotId": snap_id, "generation": get_generation(con, server_id)}
+
+
 def record_owners(con: sqlite3.Connection, server_id: str, changes: list[dict],
                   identity_uuid: str | None, identity_name: str | None) -> int:
     """Remember uuid->name per ender-chest key (powers profile labels)."""

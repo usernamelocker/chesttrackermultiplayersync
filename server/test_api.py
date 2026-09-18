@@ -194,4 +194,25 @@ assert all("pos" in t for t in r["tombstones"]), r["tombstones"]
 assert EUUID in r.get("owners", {}), r.get("owners")
 print("pullWebPage ok")
 
+# --- wipe: admin two-step, generation bumps, snapshots kept ---
+r = c.post("/api/wipe", json=dict(fident(STRANGER, CANON), confirm=False),
+           headers={"X-CMSync-Token": "wrong"})
+assert r.status_code == 401, (r.status_code, r.text)
+r = c.post("/api/wipe", json=dict(fident(STRANGER, CANON), confirm=False), headers=TOK).json()
+assert r["status"] == "CONFIRM_REQUIRED" and r["challenge"] and r["containers"] > 0, r
+r = c.post("/api/wipe", json=dict(fident(STRANGER, CANON), confirm=True, challenge="nope"),
+           headers=TOK)
+assert r.status_code == 400 and r.json()["status"] == "BAD_CHALLENGE", (r.status_code, r.text)
+r = c.post("/api/wipe", json=dict(fident(STRANGER, CANON), confirm=True,
+                                  challenge=c.post("/api/wipe", json=dict(fident(STRANGER, CANON),
+                                  confirm=False), headers=TOK).json()["challenge"]), headers=TOK).json()
+assert r["status"] == "WIPED" and r["generation"] == 1, r
+assert c.get(f"/api/view/{CANON}").json()["containers"] == 0
+assert c.get("/api/snapshots", params={"serverId": CANON}).json()["snapshots"], "snapshots kept"
+r = c.post("/api/handshake", json=fident(STRANGER, CANON), headers=TOK).json()
+assert r["status"] == "SYNCED" and r["generation"] == 1, r
+r = c.get("/api/pull", params={"serverId": CANON, "playerUuid": STRANGER}, headers=TOK).json()
+assert r["generation"] == 1 and r["changes"] == [], r
+print("wipe ok")
+
 print("ALL API TESTS PASSED")
