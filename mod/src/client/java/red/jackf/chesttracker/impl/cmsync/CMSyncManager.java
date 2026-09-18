@@ -482,6 +482,7 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
         try {
             pull = CMSyncHttp.pull(url, token, serverId, playerUuid,
                     playerPos.getX(), playerPos.getY(), playerPos.getZ(), dim).join();
+            LOGGER.error(pull);
         } catch (RuntimeException ex) {
             CMSyncLog.log("pull", "bank=" + bankId + " THREW: " + CMSyncLog.trunc(ex.getMessage(), 200));
             client.execute(() -> handlePullError(client, bankId, CMSyncLog.trunc(ex.getMessage(), 160)));
