@@ -27,9 +27,18 @@ SERVER_ID_ALIASES: set[str] = _CSV("SERVER_ID_ALIASES")
 
 
 def canonical_server_id(server_id: str) -> str:
-    """Map a known alias to the canonical id; unknown ids pass through (then denied)."""
-    if server_id in SERVER_ID_ALIASES:
+    """Map a known alias to the canonical id; unknown ids pass through (then denied).
+
+    Case-insensitive: different client versions report the same server with
+    different capitalisation (multiplayer/Fabriccraft_net vs
+    multiplayer/fabriccraft_net). All spellings resolve to the single canonical
+    id so they share one bank instead of 403ing.
+    """
+    if EXPECTED_SERVER_ID and server_id.lower() == EXPECTED_SERVER_ID.lower():
         return EXPECTED_SERVER_ID
+    for alias in SERVER_ID_ALIASES:
+        if server_id.lower() == alias.lower():
+            return EXPECTED_SERVER_ID
     return server_id
 WHITELIST_UUIDS: set[str] = _CSV("WHITELIST_UUIDS")
 SHARED_TOKEN = os.environ.get("SHARED_TOKEN", "")

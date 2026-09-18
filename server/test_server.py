@@ -96,9 +96,26 @@ def test_snapshot_restore():
     con.close()
     print("snapshot ok")
 
+def test_canonical_case():
+    import config
+    old_exp, old_alias = config.EXPECTED_SERVER_ID, config.SERVER_ID_ALIASES
+    try:
+        config.EXPECTED_SERVER_ID = "multiplayer/fabriccraft_net"
+        config.SERVER_ID_ALIASES = {"multiplayer/vip_fabriccraft_net"}
+        # exact + case variants all resolve to the one canonical bank
+        assert config.canonical_server_id("multiplayer/fabriccraft_net") == "multiplayer/fabriccraft_net"
+        assert config.canonical_server_id("multiplayer/Fabriccraft_net") == "multiplayer/fabriccraft_net"
+        assert config.canonical_server_id("multiplayer/VIP_FABRICCRAFT_NET") == "multiplayer/fabriccraft_net"
+        # unknown ids still pass through (then denied)
+        assert config.canonical_server_id("multiplayer/other_net") == "multiplayer/other_net"
+    finally:
+        config.EXPECTED_SERVER_ID, config.SERVER_ID_ALIASES = old_exp, old_alias
+    print("canonical case ok")
+
 if __name__ == "__main__":
     test_lww()
     test_mass_delete_guard()
     test_range_gate()
     test_snapshot_restore()
+    test_canonical_case()
     print("ALL SERVER TESTS PASSED")
