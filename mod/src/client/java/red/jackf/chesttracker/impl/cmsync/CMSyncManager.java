@@ -383,6 +383,8 @@ public class CMSyncManager {
                 Memory.CODEC.encodeStart(ops, r.detached()).result().ifPresent(j -> raw.add("memory", j));
             } catch (RuntimeException e) {
                 LOGGER.debug("cmsync: NBT encode failed for {} {}, sending names+counts only", r.key(), r.pos());
+                CMSyncLog.log("push", "NBT encode FAILED for " + r.key() + " " + r.pos()
+                        + " (names+counts only): " + CMSyncLog.trunc(e.getMessage(), 120));
             }
             if (r.hasOv()) {
                 try {
@@ -641,8 +643,14 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
                     }
                 }
                 if (mem == null) {
+                    // names+counts fallback (cross-version / legacy sender / NBT encode
+                    // failure): nested contents (shulker boxes etc.) are LOST here, so
+                    // stamp the observation time, NOT now — a fabricated "now" would
+                    // outrank the genuine record everywhere and wipe nested NBT.
+                    CMSyncLog.log("merge", "fallback names+counts (nested NBT lost) for " + key + " " + pos
+                            + " myMc=" + myMc + " rawMc=" + rawMc + " pulledAt=" + pulledAt);
                     mem = new Memory(ItemNormalizer.fromNormList(norm), null, List.of(), Optional.empty(),
-                            loadedTime, gameTime, Instant.now(), null, null);
+                            loadedTime, gameTime, pulledAt != null ? pulledAt : Instant.now(), null, null);
                 }
                 bank.addMemory(key, pos, mem);
                 applied++;
