@@ -7,7 +7,8 @@ Full-bank raw replace breaks across versions. So:
 
 * **Index/merge/search on normalized form only:** `{id, count}`.
 * **Preserve `raw` per writer version** for same-version fidelity, but never require other versions to parse it.
-* **Digest components** for change detection without coupling: `componentsDigest = sha256(canonical(raw.components))`.
+* Each norm entry carries a `componentsDigest` marker (currently the literal `"v1"`;
+  digests are intentionally excluded from equality/hashes — see projection).
 
 ```json
 {"id": "minecraft:iron_ingot", "count": 64, "componentsDigest": "abc123…"}
@@ -29,6 +30,13 @@ change additionally carries (all inside the server-opaque `raw` blob — no serv
 
 * Sender encodes its native `Memory` record (same codec as its own save files) off-thread.
 * Receiver restores everything **iff `raw.mc` equals its own MC version**, else names+counts fallback.
+* **Fallback rule (load-bearing):** the norm view carries no nested NBT (shulker/box
+  contents) and no components. A fallback reconstruction MUST keep the observation
+  time (`updatedAt`), never stamp `now()` — a fabricated fresh timestamp outranks
+  the genuine record on every LWW hop (client, push, server) and permanently wipes
+  nested contents everywhere. This exact bug once emptied every synced shulker
+  within a minute. Server ties (`stored >= incoming`) keep the stored version,
+  which is what makes the stamped fallback safe.
 * Change-detection hashes cover identity + items + overrides but NEVER the raw blob
   (same chest encodes to different bytes per MC version — hashing it would flap forever).
 * Merge: same-UUID identical echo skipped (protects live entity tracking); otherwise
@@ -40,7 +48,8 @@ change additionally carries (all inside the server-opaque `raw` blob — no serv
 ## Client duties (`ItemNormalizer.java` in overlay)
 
 1. On push: map each `ItemStack` → `{id: registry id, count, componentsDigest}` + keep `raw` chunk from `DATA_CODEC`.
-2. On pull: if entry `mcVersion == mine`, apply `raw` if present; else build stacks from normalized list
+2. On pull: if `raw.mc` equals your MC version, apply `raw.memory` (full restore);
+   else build stacks from the normalized list
    (count + id, no components → tooltip shows base item, still searchable).
 3. Strip list: never send `minecraft:air` / empty stacks. Clamp count to >=1.
 4. Tolerate unknown `id`s from newer versions: keep them, show fallback name, still countable.

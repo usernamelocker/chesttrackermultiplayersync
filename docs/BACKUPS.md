@@ -1,4 +1,4 @@
-# Backups (periodic saves — you asked for this)
+# Backups (periodic saves)
 
 Two layers; either alone recovers a wipe.
 
@@ -6,9 +6,12 @@ Two layers; either alone recovers a wipe.
 
 * Server auto-`take_snapshot(serverId)` at most every `SNAPSHOT_INTERVAL_MIN` (default 15min) on push.
 * Keeps last `SNAPSHOT_KEEP` (default 96 = 24h at 15min).
-* Mass-delete quarantine also snapshots **before** rejecting.
+* Mass deletes snapshot **before applying** (they go through + warning log, nothing
+  is rejected — the snapshot is the undo).
+* Wipes do not delete snapshots.
 * List: `GET /api/snapshots?serverId=...`
-* Restore (admin token): `POST /api/restore {"serverId": "...", "snapshotId": 12}` → clients pull within ~10s.
+* Restore (admin token): `POST /api/restore {"serverId": "...", "snapshotId": 12}` →
+  clients pick it up within ~10s.
 
 ## 2. Filesystem `.backup` (cron, survives SQLite corruption)
 
@@ -17,7 +20,10 @@ Two layers; either alone recovers a wipe.
 ```
 
 * Uses online-safe `sqlite3.backup()`, keeps last 14 files in `server/backups/`.
-* Also prunes `tombstones` older than `TOMBSTONE_TTL_DAYS` (default 30).
+* Tombstones older than `TOMBSTONE_TTL_DAYS` (default 30) are pruned on snapshot ticks.
+* Docker: snapshots live in the `cmsync-data` volume; run
+  `python /app/backup.py` in the container console for file backups
+  (`cmsync-backups` volume). Export `cmsync-data` before big tests.
 
 ## Restore drill (do once)
 
