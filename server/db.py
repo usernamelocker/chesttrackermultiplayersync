@@ -99,11 +99,19 @@ def apply_changes(con: sqlite3.Connection, server_id: str, changes: list[dict]) 
             if cur and cur["updated_at"] >= c["updatedAt"]:
                 skipped += 1
                 continue
-            con.execute("INSERT OR REPLACE INTO memories(server_id,key,pos,items_norm,raw,mc_version,updated_by,updated_at)"
-                        " VALUES(?,?,?,?,?,?,?,?)",
-                        (server_id, key, pos, json.dumps(c.get("items", [])),
-                         json.dumps(c["raw"]) if c.get("raw") is not None else None,
-                         c.get("mcVersion"), c.get("updatedBy"), c["updatedAt"]))
+                // Preserve existing raw and mc_version if incoming change lacks them (fallback)
+                cur = con.execute("SELECT raw, mc_version FROM memories WHERE server_id=? AND key=? AND pos=?",
+                                  (server_id, key, pos)).fetchone()
+                existing_raw = cur["raw"] if cur else None
+                existing_mc = cur["mc_version"] if cur else None
+                raw_val = c.get("raw") if c.get("raw") is not None else existing_raw
+                mc_val = c.get("mcVersion") if c.get("mcVersion") is not None else existing_mc
+                con.execute("INSERT OR REPLACE INTO memories(server_id,key,pos,items_norm,raw,mc_version,updated_by,updated_at)"
+                            " VALUES(?,?,?,?,?,?,?,?)",
+                            (server_id, key, pos, json.dumps(c.get("items", [])),
+                             json.dumps(raw_val) if raw_val is not None else None,
+                             mc_val,
+                             c.get("updatedBy"), c["updatedAt"]))
             con.execute("DELETE FROM tombstones WHERE server_id=? AND key=? AND pos=?", (server_id, key, pos))
             applied += 1
     con.commit()

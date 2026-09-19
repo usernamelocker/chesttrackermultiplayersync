@@ -621,7 +621,7 @@ public class ChestTrackerScreen extends Screen {
                 (pos, memory) -> true),
         CHESTS(GuiUtil.twoSprite("container_filter/chests"),
                 translatable("chesttracker.gui.containerFilter.chests"),
-                (pos, memory) -> memory.container().map(b -> b instanceof AbstractChestBlock<?>).orElse(false)),
+                                (pos, memory) -> memory.container().isPresent() || !memory.items().isEmpty()),
         BARRELS(GuiUtil.twoSprite("container_filter/barrels"),
                 translatable("chesttracker.gui.containerFilter.barrels"),
                 (pos, memory) -> memory.container().map(b -> b instanceof BarrelBlock).orElse(false)),

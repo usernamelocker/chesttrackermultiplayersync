@@ -328,8 +328,12 @@ public class CMSyncManager {
                             nzL(mem.inGameTimestamp(), Memory.UNKNOWN_WORLD_TIMESTAMP),
                             nzT(mem.realTimestamp()), null, null);
                     OverrideInfo ov = keyImpl.overrides().get(m.getKey());
+                    // LWW honesty: send the observation time, NOT now. Re-stamping now()
+                    // on every push lets lossy copies (cross-version fallback, stripped
+                    // blobs) outrank the genuine record on the very next cycle.
+                    Instant observed = mem.realTimestamp() != null ? mem.realTimestamp() : Instant.now();
                     snapshot.add(new RawEntry(key, ItemNormalizer.posToString(m.getKey()),
-                            Instant.now().toString(), copies, clone,
+                            observed.toString(), copies, clone,
                             ov != null ? ov.getCustomName() : null,
                             ov != null ? ov.getManualMode().name() : ManualMode.DEFAULT.name(),
                             ov != null));
@@ -370,6 +374,9 @@ public class CMSyncManager {
                             boolean syncContainerNames, boolean chatNotifications) {
         List<JsonObject> changes = new ArrayList<>(snapshot.size());
         List<JsonObject> hashProj = new ArrayList<>(snapshot.size());
+        int memBlobs = 0;
+        long memBlobBytes = 0;
+        int missingBlobs = 0;
         for (RawEntry r : snapshot) {
             List<JsonObject> norm = ItemNormalizer.toNormList(r.stacks());
             com.google.gson.JsonArray arr = new com.google.gson.JsonArray();
@@ -380,8 +387,20 @@ public class CMSyncManager {
             raw.addProperty("v", 2);
             raw.addProperty("mc", mcVersion);
             try {
-                Memory.CODEC.encodeStart(ops, r.detached()).result().ifPresent(j -> raw.add("memory", j));
+                var enc = Memory.CODEC.encodeStart(ops, r.detached());
+                if (enc.result().isPresent()) {
+                    raw.add("memory", enc.result().get());
+                    memBlobs++;
+                    memBlobBytes += raw.toString().length();
+                } else {
+                    // silent strip: no blob at all (receiver falls back to names+counts)
+                    missingBlobs++;
+                    CMSyncLog.log("push", "NBT encode EMPTY for " + r.key() + " " + r.pos()
+                            + " (names+counts only): "
+                            + CMSyncLog.trunc(enc.error().map(Object::toString).orElse(""), 160));
+                }
             } catch (RuntimeException e) {
+                missingBlobs++;
                 LOGGER.debug("cmsync: NBT encode failed for {} {}, sending names+counts only", r.key(), r.pos());
                 CMSyncLog.log("push", "NBT encode FAILED for " + r.key() + " " + r.pos()
                         + " (names+counts only): " + CMSyncLog.trunc(e.getMessage(), 120));
@@ -407,6 +426,8 @@ public class CMSyncManager {
             hashProj.add(ItemNormalizer.projection(r.key(), r.pos(), false, norm, r.ovName(), r.ovMode()));
         }
         final int upsertCount = changes.size();
+        CMSyncLog.log("push", "bank=" + bankId + " upserts=" + upsertCount + " nbtBlobs=" + memBlobs
+                + "/" + upsertCount + " missing=" + missingBlobs + " blobBytes=" + memBlobBytes);
 
         // append propagated deletes (broken/emptied since last snapshot)
         for (String[] del : deletedPairs) {
