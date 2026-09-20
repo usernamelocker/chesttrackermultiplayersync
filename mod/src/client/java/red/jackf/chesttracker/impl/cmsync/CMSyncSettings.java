@@ -200,6 +200,7 @@ public class CMSyncSettings {
             for (var e : portableShadows.entrySet()) shadows.add(e.getKey(), e.getValue().deepCopy());
             o.add("portableShadows", shadows);
             Files.writeString(pathFor(bankId), GSON.toJson(o), StandardCharsets.UTF_8);
+            CMSyncManager.INSTANCE.settingsSaved(bankId, this);
         } catch (IOException ignored) {
         }
     }

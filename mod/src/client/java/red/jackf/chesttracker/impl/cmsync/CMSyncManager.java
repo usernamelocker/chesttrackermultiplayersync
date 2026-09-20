@@ -54,6 +54,8 @@ public class CMSyncManager {
     private static final int EMPTY_HOLD_MIN_BANK = 10;
 
     @Nullable private String activeBankId = null;
+    /** Cached settings for the active bank; loading them parses the full portable shadow file. */
+    @Nullable private CMSyncSettings activeSettings = null;
     @Nullable private String lastPushHash = null;
     private int lastPushedCount = -1;
     private boolean failing = false;
@@ -92,7 +94,7 @@ public class CMSyncManager {
 
     public boolean isActiveFor(String bankId) {
         if (activeBankId == null || !activeBankId.equals(bankId)) return false;
-        return CMSyncSettings.load(bankId).isActive();
+        return settingsFor(bankId).isActive();
     }
 
     public void markActivated(String bankId, String serverId) {
@@ -132,7 +134,7 @@ public class CMSyncManager {
     /** Teammate uuids -> last seen names for ender chest profiles (sidecar cache + live player). */
     public Map<UUID, String> getOwnerNames(String bankId) {
         Map<UUID, String> out = new HashMap<>();
-        for (var e : CMSyncSettings.load(bankId).ownerNames.entrySet()) {
+        for (var e : settingsFor(bankId).ownerNames.entrySet()) {
             try {
                 out.put(UUID.fromString(e.getKey()), e.getValue());
             } catch (IllegalArgumentException ignored) {
@@ -159,7 +161,7 @@ public class CMSyncManager {
      */
     public boolean applyServerGeneration(String bankId, int generation) {
         if (generation < 0) return false;
-        CMSyncSettings s = CMSyncSettings.load(bankId);
+        CMSyncSettings s = settingsFor(bankId);
         if (generation <= s.generation) return false;
         s.generation = generation;
         s.acknowledgedKeys.clear();
@@ -188,6 +190,7 @@ public class CMSyncManager {
 
     private void resetSession() {
         this.activeBankId = null;
+        this.activeSettings = null;
         this.lastPushHash = null;
         this.lastPushedCount = -1;
         this.failing = false;
@@ -208,8 +211,20 @@ public class CMSyncManager {
         this.lastTickNote = null;
     }
 
+    private CMSyncSettings settingsFor(String bankId) {
+        if (activeSettings == null || !Objects.equals(activeBankId, bankId)) {
+            activeSettings = CMSyncSettings.load(bankId);
+        }
+        return activeSettings;
+    }
+
+    /** Called by CMSyncSettings.save so UI/command edits become visible without rereading disk every tick. */
+    void settingsSaved(String bankId, CMSyncSettings settings) {
+        if (Objects.equals(activeBankId, bankId)) activeSettings = settings;
+    }
+
     private void loadPersistedSyncState(String bankId) {
-        CMSyncSettings settings = CMSyncSettings.load(bankId);
+        CMSyncSettings settings = settingsFor(bankId);
         this.lastSnapshotKeys = settings.baselineSyncEnder == null
                 ? null : copyKeySets(settings.acknowledgedKeys);
         this.lastSyncEnder = settings.baselineSyncEnder;
@@ -257,7 +272,7 @@ public class CMSyncManager {
             return;
         }
         MemoryBankImpl bank = bankOpt.get();
-        CMSyncSettings settings = CMSyncSettings.load(bank.getId());
+        CMSyncSettings settings = settingsFor(bank.getId());
         if (!settings.isActive()) {
             if (activeBankId != null) {
                 resetSession();
@@ -357,7 +372,7 @@ public class CMSyncManager {
         if (!CMSyncQueue.tryClaim()) return;
         lastAttemptMs = now;
         lastTickNote = null;
-        CMSyncSettings pendingSettings = CMSyncSettings.load(bank.getId());
+        CMSyncSettings pendingSettings = settingsFor(bank.getId());
         pendingSettings.pendingDeletes.clear();
         for (var e : pendingDeletes.entrySet()) pendingSettings.pendingDeletes.put(e.getKey(), new HashMap<>(e.getValue()));
         pendingSettings.save(bank.getId());
@@ -387,6 +402,7 @@ public class CMSyncManager {
         final String serverName = coord.userFriendlyName();
         final String mcVersion = gameVersion();
         final int serverGeneration = Math.max(0, settings.generation);
+        final int lastRevision = Math.max(0, settings.lastRevision);
         final DynamicOps<JsonElement> ops =
                 client.level.registryAccess().createSerializationContext(JsonOps.INSTANCE);
         // player position lets the server withhold far-away containers (range gate)
@@ -443,7 +459,7 @@ public class CMSyncManager {
                 runSyncJob(client, bankId, url, token, playerUuid, playerName,
                         serverId, serverName, mcVersion, ops, snapshot, playerPos, dim,
                         deletedPairs, snapshotKeys, snapshotSyncEnder, syncContainerNames, chatNotifications,
-                        serverGeneration);
+                        serverGeneration, lastRevision);
             } finally {
                 CMSyncQueue.release();
             }
@@ -466,7 +482,8 @@ public class CMSyncManager {
                              BlockPos playerPos, String dim,
                              List<PendingDelete> deletedPairs, Map<String, Set<String>> snapshotKeys,
                              boolean snapshotSyncEnder,
-                             boolean syncContainerNames, boolean chatNotifications, int serverGeneration) {
+                              boolean syncContainerNames, boolean chatNotifications, int serverGeneration,
+                              int lastRevision) {
         List<JsonObject> changes = new ArrayList<>(snapshot.size());
         List<JsonObject> hashProj = new ArrayList<>(snapshot.size());
         Map<String, JsonObject> portableSnapshots = new HashMap<>();
@@ -560,7 +577,7 @@ public class CMSyncManager {
                             + "To truly start over, use /cmsync wipealldata."), ChatFormatting.YELLOW);
                 }
             });
-            doPullBlocking(client, bankId, url, token, playerUuid, serverId, playerName, serverName, mcVersion, playerPos, dim, syncContainerNames, chatNotifications);
+            doPullBlocking(client, bankId, url, token, playerUuid, serverId, playerName, serverName, mcVersion, playerPos, dim, syncContainerNames, chatNotifications, lastRevision);
             CMSyncLog.log("hold", "bank=" + bankId + " held empty bank (" + lastPushedCount + " before), pull-only");
             return;
         }
@@ -599,7 +616,7 @@ public class CMSyncManager {
                         || push.result() == CMSyncHttp.Result.NOT_A_CMSYNC_SERVER) {
                     final String note = push.note().isEmpty() ? push.result().name() : push.note();
                     client.execute(() -> handleDeterministic(client, bankId, note));
-                    doPullBlocking(client, bankId, url, token, playerUuid, serverId, playerName, serverName, mcVersion, playerPos, dim, syncContainerNames, chatNotifications);
+                    doPullBlocking(client, bankId, url, token, playerUuid, serverId, playerName, serverName, mcVersion, playerPos, dim, syncContainerNames, chatNotifications, lastRevision);
                     return;
                 }
                 client.execute(() -> handlePushResult(client, bankId, push.result(),
@@ -607,7 +624,7 @@ public class CMSyncManager {
                         false, push.note(), upsertCount, push.statusCode(), push.tookMs(),
                         snapshotKeys, snapshotSyncEnder, deletedPairs, portableSnapshots));
                 if (push.result() == CMSyncHttp.Result.QUARANTINED) {
-                    doPullBlocking(client, bankId, url, token, playerUuid, serverId, playerName, serverName, mcVersion, playerPos, dim, syncContainerNames, chatNotifications);
+                    doPullBlocking(client, bankId, url, token, playerUuid, serverId, playerName, serverName, mcVersion, playerPos, dim, syncContainerNames, chatNotifications, lastRevision);
                     return;
                 }
             } else if (emptyLocal) {
@@ -616,7 +633,7 @@ public class CMSyncManager {
                     if (bankId.equals(activeBankId)) lastResult = "empty-local, pull-only";
                 });
             }
-            doPullBlocking(client, bankId, url, token, playerUuid, serverId, playerName, serverName, mcVersion, playerPos, dim, syncContainerNames, chatNotifications);
+            doPullBlocking(client, bankId, url, token, playerUuid, serverId, playerName, serverName, mcVersion, playerPos, dim, syncContainerNames, chatNotifications, lastRevision);
         } catch (RuntimeException ex) {
             LOGGER.error("cmsync job failed", ex);
             client.execute(() -> handlePushResult(client, bankId,
@@ -628,14 +645,13 @@ public class CMSyncManager {
 private void doPullBlocking(Minecraft client, String bankId, String url, String token,
                             String playerUuid, String serverId, String playerName,
                             String serverName, String mcVersion, BlockPos playerPos, String dim,
-                            boolean syncContainerNames, boolean chatNotifications) {
+                             boolean syncContainerNames, boolean chatNotifications, int lastRevision) {
         CMSyncHttp.Identity ident = new CMSyncHttp.Identity(
                 playerUuid, playerName, serverId, serverName, mcVersion, MOD_VERSION);
         CMSyncHttp.PullOutcome pull;
         try {
-            int since = Math.max(0, CMSyncSettings.load(bankId).lastRevision);
             pull = CMSyncHttp.pull(url, token, serverId, playerUuid,
-                    since > 0 ? since : null,
+                    lastRevision > 0 ? lastRevision : null,
                     playerPos.getX(), playerPos.getY(), playerPos.getZ(), dim).join();
         } catch (RuntimeException ex) {
             CMSyncLog.log("pull", "bank=" + bankId + " THREW: " + CMSyncLog.trunc(ex.getMessage(), 200));
@@ -648,15 +664,21 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
             if (f.result() == CMSyncHttp.Result.SYNCED) {
                 // wipe first: merging pulled data into about-to-be-cleared locals is pointless
                 boolean generationApplied = applyServerGeneration(bankId, f.generation());
+                boolean settingsChanged = false;
                 if (!generationApplied)
-                    applyPull(client, bankId, f.changes(), f.tombstones(), playerUuid, mcVersion, syncContainerNames);
+                    settingsChanged = applyPull(client, bankId, f.changes(), f.tombstones(), playerUuid, mcVersion, syncContainerNames);
                 if (!generationApplied && f.revision() >= 0) {
-                    CMSyncSettings s = CMSyncSettings.load(bankId);
-                    s.lastRevision = Math.max(s.lastRevision, f.revision());
-                    s.save(bankId);
+                    CMSyncSettings s = settingsFor(bankId);
+                    if (f.revision() > s.lastRevision) {
+                        s.lastRevision = f.revision();
+                        settingsChanged = true;
+                    }
+                }
+                if (settingsChanged) {
+                    settingsFor(bankId).save(bankId);
                 }
                 if (!f.owners().isEmpty()) {
-                    CMSyncSettings s = CMSyncSettings.load(bankId);
+                    CMSyncSettings s = settingsFor(bankId);
                     boolean changed = false;
                     for (var e : f.owners().entrySet()) {
                         if (!e.getValue().equals(s.ownerNames.get(e.getKey()))) {
@@ -700,13 +722,13 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
         });
     }
 
-    private void applyPull(Minecraft client, String bankId, List<JsonObject> changes,
+    private boolean applyPull(Minecraft client, String bankId, List<JsonObject> changes,
                            List<JsonObject> tombstones, String myUuid, String myMc,
                            boolean syncContainerNames) {
         Optional<MemoryBankImpl> opt = MemoryBankAccessImpl.INSTANCE.getLoadedInternal();
-        if (opt.isEmpty() || !opt.get().getId().equals(bankId) || client.level == null) return;
+        if (opt.isEmpty() || !opt.get().getId().equals(bankId) || client.level == null) return false;
         MemoryBankImpl bank = opt.get();
-        CMSyncSettings syncSettings = CMSyncSettings.load(bankId);
+        CMSyncSettings syncSettings = settingsFor(bankId);
         long loadedTime = bank.getMetadata().getLoadedTime();
         long gameTime = client.level.getGameTime();
         DynamicOps<JsonElement> ops =
@@ -715,6 +737,7 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
         int applied = 0;
         int tombsApplied = 0;
         int skipped = 0;
+        boolean settingsChanged = false;
         for (JsonObject ch : changes) {
             try {
                 Identifier key = Identifier.parse(ch.get("key").getAsString());
@@ -730,7 +753,7 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
                         ? ch.getAsJsonObject("raw") : null;
                 JsonObject portableRaw = raw != null && raw.has("portable") && raw.get("portable").isJsonObject()
                         ? raw.getAsJsonObject("portable") : null;
-                PortableItemCodec.Decoded portable = PortableItemCodec.decode(portableRaw, ops);
+                PortableItemCodec.Decoded portable = null;
                 int v = 1;
                 try {
                     if (raw != null && raw.has("v")) v = raw.get("v").getAsInt();
@@ -764,6 +787,10 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
                 // last-observation-wins: my fresher recording stands
                 Instant localT = local != null ? local.realTimestamp() : null;
                 if (local != null && pulledAt != null && localT != null && !localT.isBefore(pulledAt)) continue;
+
+                // Decode portable components only after the cheap echo/LWW checks above.
+                // Range refreshes can contain hundreds of unchanged records.
+                portable = PortableItemCodec.decode(portableRaw, ops);
 
                 // full NBT restore on same MC version, else names+counts fallback
                 Memory mem = null;
@@ -799,8 +826,14 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
                 }
                 bank.addMemoryPreservingTimestamp(key, pos, mem);
                 String storedShadowKey = shadowKey(key.toString(), ItemNormalizer.posToString(pos));
-                if (portable != null) syncSettings.portableShadows.put(storedShadowKey, portable.shadow().deepCopy());
-                else syncSettings.portableShadows.remove(storedShadowKey);
+                if (portable != null) {
+                    if (!portable.shadow().equals(syncSettings.portableShadows.get(storedShadowKey))) {
+                        syncSettings.portableShadows.put(storedShadowKey, portable.shadow().deepCopy());
+                        settingsChanged = true;
+                    }
+                } else {
+                    settingsChanged |= syncSettings.portableShadows.remove(storedShadowKey) != null;
+                }
                 applied++;
 
                 // overrides ride with their entry; v2 senders without the blob explicitly cleared
@@ -834,7 +867,7 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
                 if (local != null && del != null && local.realTimestamp() != null
                         && local.realTimestamp().isAfter(del)) continue;
                 bank.removeMemory(kid, pos);
-                syncSettings.portableShadows.remove(shadowKey(kid.toString(), ItemNormalizer.posToString(pos)));
+                settingsChanged |= syncSettings.portableShadows.remove(shadowKey(kid.toString(), ItemNormalizer.posToString(pos))) != null;
                 tombsApplied++;
             } catch (RuntimeException e) {
                 skipped++;
@@ -843,7 +876,7 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
         }
         CMSyncLog.log("merge", "bank=" + bankId + " applied=" + applied
                 + " tombs=" + tombsApplied + " skipped=" + skipped);
-        syncSettings.save(bankId);
+        return settingsChanged;
     }
 
     private static boolean overrideStateEquals(@Nullable OverrideInfo local,
@@ -909,7 +942,7 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
                 if (snapshotKeys != null) {
                     lastSnapshotKeys = copyKeySets(snapshotKeys);
                     lastSyncEnder = snapshotSyncEnder;
-                    CMSyncSettings settings = CMSyncSettings.load(bankId);
+                    CMSyncSettings settings = settingsFor(bankId);
                     settings.acknowledgedKeys.clear();
                     settings.acknowledgedKeys.putAll(copyKeySets(snapshotKeys));
                     settings.baselineSyncEnder = snapshotSyncEnder;
