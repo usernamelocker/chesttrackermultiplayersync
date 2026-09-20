@@ -35,6 +35,7 @@ public class MemoryBankImpl implements MemoryBank {
     private final Map<Identifier, MemoryKeyImpl> memoryKeys;
     private Metadata metadata;
     private String id;
+    private long mutationVersion = 0;
 
     public MemoryBankImpl(Metadata metadata, Map<Identifier, MemoryKeyImpl> keys) {
         this.metadata = metadata;
@@ -75,7 +76,17 @@ public class MemoryBankImpl implements MemoryBank {
      * @param key Key to remove
      */
     public void removeKey(Identifier key) {
-        this.memoryKeys.remove(key);
+        if (this.memoryKeys.remove(key) != null) mutationVersion++;
+    }
+
+    /** Monotonic local mutation marker used by incremental CMSync snapshots. */
+    public long getMutationVersion() {
+        return mutationVersion;
+    }
+
+    /** Marks a mutation made by an internal helper that edits a MemoryKey map directly. */
+    public void markMutated() {
+        mutationVersion++;
     }
 
     /**
@@ -172,6 +183,7 @@ public class MemoryBankImpl implements MemoryBank {
         if (key.isEmpty()) {
             this.memoryKeys.remove(keyId);
         }
+        mutationVersion++;
     }
 
     @Override
@@ -182,6 +194,7 @@ public class MemoryBankImpl implements MemoryBank {
             if (memoryKey.isEmpty()) {
                 this.memoryKeys.remove(key);
             }
+            mutationVersion++;
         }
     }
 
@@ -201,6 +214,7 @@ public class MemoryBankImpl implements MemoryBank {
                 this.removeKey(key);
             }
         }
+        mutationVersion++;
     }
 
     public void setNameOverride(Identifier key, BlockPos pos, @NotNull String name) {
@@ -232,5 +246,6 @@ public class MemoryBankImpl implements MemoryBank {
                 this.removeKey(key);
             }
         }
+        mutationVersion++;
     }
 }

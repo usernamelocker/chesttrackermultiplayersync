@@ -66,7 +66,7 @@ body = dict(ident(ALICE), fullHash="h1", changes=[
               "override": {"customName": "Vault", "manualMode": "REMEMBER"}}),
 ])
 r = c.post("/api/push", json=body).json()
-assert r["status"] == "SYNCED" and r["applied"] == 2, r
+assert r["status"] == "SYNCED" and r["applied"] == 2 and r["revision"] == 2, r
 print("push ok")
 
 r = c.get("/api/pull", params={"serverId": SID, "playerUuid": BOB}).json()
@@ -75,6 +75,10 @@ vault = [x for x in r["changes"] if x["pos"] == "4,5,6"][0]
 assert vault["raw"]["override"]["customName"] == "Vault", vault
 assert vault["raw"]["memory"]["items"][0]["id"] == "minecraft:diamond", vault
 print("pull ok (raw blob round-trips untouched)")
+
+r = c.get("/api/pull", params={"serverId": SID, "playerUuid": BOB, "since": 1}).json()
+assert r["revision"] == 2 and len(r["changes"]) == 1 and r["changes"][0]["pos"] == "4,5,6", r
+print("incremental pull ok")
 
 r = c.get(f"/api/view/{SID}").json()
 assert r["totals"] == {"minecraft:iron_ingot": 5, "minecraft:diamond": 2}, r

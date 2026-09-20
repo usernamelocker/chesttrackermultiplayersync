@@ -72,7 +72,8 @@ public class CMSyncHttp {
     }
 
     public record PullOutcome(Result result, List<JsonObject> changes, List<JsonObject> tombstones,
-                                int containers, Map<String, String> owners, int generation, String note) {
+                                int containers, Map<String, String> owners, int generation, int revision,
+                                String note) {
     }
 
     private CMSyncHttp() {
@@ -180,12 +181,14 @@ public class CMSyncHttp {
     }
 
     public static CompletableFuture<PullOutcome> pull(String baseUrl, String token, String serverId, String playerUuid,
+                                                      @Nullable Integer since,
                                                       @Nullable Integer px, @Nullable Integer py, @Nullable Integer pz,
                                                       @Nullable String dim) {
         String b = baseUrl.strip();
         if (b.endsWith("/")) b = b.substring(0, b.length() - 1);
         StringBuilder url = new StringBuilder(b + "/api/pull?serverId=" + uri(serverId)
                 + "&playerUuid=" + uri(playerUuid));
+        if (since != null && since >= 0) url.append("&since=").append(since);
         // player position lets the server withhold far-away containers (range gate);
         // omitted for old servers, which simply return everything as before
         if (px != null && py != null && pz != null && dim != null)
@@ -196,7 +199,7 @@ public class CMSyncHttp {
         return CLIENT.sendAsync(rb.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
                 .thenApply(resp -> {
                     Result r = classify(resp);
-                    if (r != Result.SYNCED) return new PullOutcome(r, List.of(), List.of(), -1, Map.of(), -1, "");
+                    if (r != Result.SYNCED) return new PullOutcome(r, List.of(), List.of(), -1, Map.of(), -1, -1, "");
                     try {
                         JsonObject o = JsonParser.parseString(resp.body()).getAsJsonObject();
                         List<JsonObject> ch = new java.util.ArrayList<>();
@@ -205,9 +208,17 @@ public class CMSyncHttp {
                         if (o.has("tombstones")) o.getAsJsonArray("tombstones").forEach(e -> tb.add(e.getAsJsonObject()));
                         int c = o.has("containers") ? o.get("containers").getAsInt() : -1;
                         int generation = -1;
+                        int revision = -1;
                         try {
                             if (o.has("generation") && !o.get("generation").isJsonNull())
                                 generation = o.get("generation").getAsInt();
+                        } catch (RuntimeException ignored) {
+                        }
+                        try {
+                            if (o.has("revision") && !o.get("revision").isJsonNull())
+                                revision = o.get("revision").getAsInt();
+                            else if (o.has("cursor") && !o.get("cursor").isJsonNull())
+                                revision = o.get("cursor").getAsInt();
                         } catch (RuntimeException ignored) {
                         }
                         Map<String, String> owners = new HashMap<>();
@@ -219,12 +230,12 @@ public class CMSyncHttp {
                                 }
                             }
                         }
-                        return new PullOutcome(Result.SYNCED, ch, tb, c, owners, generation, "");
+                        return new PullOutcome(Result.SYNCED, ch, tb, c, owners, generation, revision, "");
                     } catch (RuntimeException e) {
-                        return new PullOutcome(Result.NOT_A_CMSYNC_SERVER, List.of(), List.of(), -1, Map.of(), -1, "unreadable pull body");
+                        return new PullOutcome(Result.NOT_A_CMSYNC_SERVER, List.of(), List.of(), -1, Map.of(), -1, -1, "unreadable pull body");
                     }
                 })
-                .exceptionally(t -> new PullOutcome(classifyError(t), List.of(), List.of(), -1, Map.of(), -1, errorMessage(t)));
+                .exceptionally(t -> new PullOutcome(classifyError(t), List.of(), List.of(), -1, Map.of(), -1, -1, errorMessage(t)));
     }
 
     /**

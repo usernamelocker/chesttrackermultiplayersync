@@ -48,6 +48,10 @@ public class CMSyncSettings {
     public final Map<String, Map<String, String>> pendingDeletes = new HashMap<>();
     /** Null means no acknowledged baseline exists yet. */
     @Nullable public Boolean baselineSyncEnder = null;
+    /** Highest durable server change revision merged into this bank. */
+    public int lastRevision = 0;
+    /** Portable item envelopes keyed by key + position, retained across local edits. */
+    public final Map<String, JsonObject> portableShadows = new HashMap<>();
 
     public boolean isActive() {
         return enabled && url != null && !paused;
@@ -66,6 +70,8 @@ public class CMSyncSettings {
         acknowledgedKeys.clear();
         pendingDeletes.clear();
         baselineSyncEnder = null;
+        lastRevision = 0;
+        portableShadows.clear();
     }
 
     // ---- persistence ----
@@ -139,6 +145,16 @@ public class CMSyncSettings {
                 } catch (RuntimeException ignored) {
                 }
             }
+            try {
+                if (o.has("lastRevision") && !o.get("lastRevision").isJsonNull())
+                    st.lastRevision = Math.max(0, o.get("lastRevision").getAsInt());
+            } catch (RuntimeException ignored) {
+            }
+            if (o.has("portableShadows") && o.get("portableShadows").isJsonObject()) {
+                for (var e : o.getAsJsonObject("portableShadows").entrySet()) {
+                    if (e.getValue().isJsonObject()) st.portableShadows.put(e.getKey(), e.getValue().getAsJsonObject().deepCopy());
+                }
+            }
             return st;
         } catch (IOException | RuntimeException e) {
             return new CMSyncSettings();
@@ -179,6 +195,10 @@ public class CMSyncSettings {
             o.add("pendingDeletes", pending);
             if (baselineSyncEnder == null) o.add("baselineSyncEnder", com.google.gson.JsonNull.INSTANCE);
             else o.addProperty("baselineSyncEnder", baselineSyncEnder);
+            o.addProperty("lastRevision", lastRevision);
+            JsonObject shadows = new JsonObject();
+            for (var e : portableShadows.entrySet()) shadows.add(e.getKey(), e.getValue().deepCopy());
+            o.add("portableShadows", shadows);
             Files.writeString(pathFor(bankId), GSON.toJson(o), StandardCharsets.UTF_8);
         } catch (IOException ignored) {
         }

@@ -73,6 +73,7 @@ public class CMSyncManager {
     @Nullable private Boolean lastSyncEnder = null;
     /** Deletes detected locally and not yet confirmed by a successful push. */
     private final Map<String, Map<String, String>> pendingDeletes = new HashMap<>();
+    private long lastScannedMutationVersion = -1;
     private boolean emptyHoldNotified = false;
     @Nullable private String lastWarnedDeletes = null;
 
@@ -164,6 +165,8 @@ public class CMSyncManager {
         s.acknowledgedKeys.clear();
         s.pendingDeletes.clear();
         s.baselineSyncEnder = null;
+        s.lastRevision = 0;
+        s.portableShadows.clear();
         s.save(bankId);
         CMSyncLog.log("wipe", "bank=" + bankId + " applied server generation " + generation + ", locals cleared");
         MemoryBankAccessImpl.INSTANCE.getLoadedInternal().ifPresent(bank -> {
@@ -175,6 +178,7 @@ public class CMSyncManager {
         this.lastSnapshotKeys = null;
         this.lastSyncEnder = null;
         this.pendingDeletes.clear();
+        this.lastScannedMutationVersion = -1;
         this.lastPushedCount = -1;
         this.emptyHoldNotified = false;
         this.lastWarnedDeletes = null;
@@ -195,6 +199,7 @@ public class CMSyncManager {
         this.lastSnapshotKeys = null;
         this.lastSyncEnder = null;
         this.pendingDeletes.clear();
+        this.lastScannedMutationVersion = -1;
         this.emptyHoldNotified = false;
         this.lastWarnedDeletes = null;
         this.lastSuccess = null;
@@ -228,6 +233,10 @@ public class CMSyncManager {
         } catch (RuntimeException ignored) {
             return false;
         }
+    }
+
+    private static String shadowKey(String key, String pos) {
+        return key + "|" + pos;
     }
 
     /** Throttled guard logging: a stall logs once until a sync cycle dispatches. */
@@ -295,23 +304,27 @@ public class CMSyncManager {
         List<PendingDelete> deletedPairs = new ArrayList<>();
         Map<String, Set<String>> curKeys = new HashMap<>();
         Map<String, Map<String, Instant>> curObservations = new HashMap<>();
-        for (Map.Entry<Identifier, MemoryKeyImpl> e : bank.getMemories().entrySet()) {
-            if (EnderChestKeys.isHiddenLegacyKey(e.getKey())) continue;
-            if (!syncEnder && EnderChestKeys.isSyncableEnderKey(e.getKey())) continue;
-            Set<String> set = new HashSet<>();
-            Map<String, Instant> observations = new HashMap<>();
-            for (Map.Entry<BlockPos, Memory> m : e.getValue().getMemories().entrySet()) {
-                // must mirror the copy loop's entity skip exactly, or phantom deletes appear
-                if (m.getValue().entityId() != null) continue;
-                String pos = ItemNormalizer.posToString(m.getKey());
-                set.add(pos);
-                if (m.getValue().realTimestamp() != null) observations.put(pos, m.getValue().realTimestamp());
+        boolean scanLocal = lastScannedMutationVersion != bank.getMutationVersion()
+                || lastSnapshotKeys == null || !Objects.equals(lastSyncEnder, syncEnder);
+        if (scanLocal) {
+            for (Map.Entry<Identifier, MemoryKeyImpl> e : bank.getMemories().entrySet()) {
+                if (EnderChestKeys.isHiddenLegacyKey(e.getKey())) continue;
+                if (!syncEnder && EnderChestKeys.isSyncableEnderKey(e.getKey())) continue;
+                Set<String> set = new HashSet<>();
+                Map<String, Instant> observations = new HashMap<>();
+                for (Map.Entry<BlockPos, Memory> m : e.getValue().getMemories().entrySet()) {
+                    // must mirror the copy loop's entity skip exactly, or phantom deletes appear
+                    if (m.getValue().entityId() != null) continue;
+                    String pos = ItemNormalizer.posToString(m.getKey());
+                    set.add(pos);
+                    if (m.getValue().realTimestamp() != null) observations.put(pos, m.getValue().realTimestamp());
+                }
+                String key = e.getKey().toString();
+                curKeys.put(key, set);
+                curObservations.put(key, observations);
             }
-            String key = e.getKey().toString();
-            curKeys.put(key, set);
-            curObservations.put(key, observations);
         }
-        if (lastSnapshotKeys != null && Objects.equals(lastSyncEnder, syncEnder)) {
+        if (scanLocal && lastSnapshotKeys != null && Objects.equals(lastSyncEnder, syncEnder)) {
             for (var e : lastSnapshotKeys.entrySet()) {
                 Set<String> cur = curKeys.getOrDefault(e.getKey(), Set.of());
                 for (String pos : e.getValue()) {
@@ -348,7 +361,15 @@ public class CMSyncManager {
         pendingSettings.pendingDeletes.clear();
         for (var e : pendingDeletes.entrySet()) pendingSettings.pendingDeletes.put(e.getKey(), new HashMap<>(e.getValue()));
         pendingSettings.save(bank.getId());
-        final Map<String, Set<String>> snapshotKeys = copyKeySets(curKeys);
+        final Map<String, Set<String>> snapshotKeys = scanLocal
+                ? copyKeySets(curKeys)
+                : copyKeySets(lastSnapshotKeys != null ? lastSnapshotKeys : curKeys);
+        if (!scanLocal) {
+            for (PendingDelete deleted : deletedPairs) {
+                Set<String> positions = snapshotKeys.get(deleted.key());
+                if (positions != null) positions.remove(deleted.pos());
+            }
+        }
         final boolean snapshotSyncEnder = syncEnder;
 
         // ---- fast copy on client thread (no Gson, no codec, no HTTP) ----
@@ -373,7 +394,7 @@ public class CMSyncManager {
 
         List<RawEntry> snapshot = new ArrayList<>();
         try {
-            for (Map.Entry<Identifier, MemoryKeyImpl> e : bank.getMemories().entrySet()) {
+            if (scanLocal) for (Map.Entry<Identifier, MemoryKeyImpl> e : bank.getMemories().entrySet()) {
                 if (!syncEnder && EnderChestKeys.isSyncableEnderKey(e.getKey())) continue;
                 String key = e.getKey().toString();
                 MemoryKeyImpl keyImpl = e.getValue();
@@ -396,13 +417,16 @@ public class CMSyncManager {
                     // on every push lets lossy copies (cross-version fallback, stripped
                     // blobs) outrank the genuine record on the very next cycle.
                     Instant observed = mem.realTimestamp() != null ? mem.realTimestamp() : Instant.now();
-                    snapshot.add(new RawEntry(key, ItemNormalizer.posToString(m.getKey()),
+                    String pos = ItemNormalizer.posToString(m.getKey());
+                    JsonObject portableShadow = settings.portableShadows.get(shadowKey(key, pos));
+                    snapshot.add(new RawEntry(key, pos,
                             observed.toString(), copies, clone,
                             ov != null ? ov.getCustomName() : null,
                             ov != null ? ov.getManualMode().name() : ManualMode.DEFAULT.name(),
-                            ov != null));
+                            ov != null, portableShadow != null ? portableShadow.deepCopy() : null));
                 }
             }
+            if (scanLocal) lastScannedMutationVersion = bank.getMutationVersion();
         } catch (RuntimeException ex) {
             CMSyncQueue.release();
             LOGGER.warn("cmsync snapshot copy failed", ex);
@@ -426,7 +450,8 @@ public class CMSyncManager {
 
     private record RawEntry(String key, String pos, String updatedAt,
                             List<ItemStack> stacks, Memory detached,
-                            @Nullable String ovName, String ovMode, boolean hasOv) {
+                            @Nullable String ovName, String ovMode, boolean hasOv,
+                            @Nullable JsonObject portableShadow) {
     }
 
     private record PendingDelete(String key, String pos, String updatedAt) {
@@ -442,6 +467,7 @@ public class CMSyncManager {
                              boolean syncContainerNames, boolean chatNotifications) {
         List<JsonObject> changes = new ArrayList<>(snapshot.size());
         List<JsonObject> hashProj = new ArrayList<>(snapshot.size());
+        Map<String, JsonObject> portableSnapshots = new HashMap<>();
         int memBlobs = 0;
         long memBlobBytes = 0;
         int missingBlobs = 0;
@@ -454,6 +480,8 @@ public class CMSyncManager {
             JsonObject raw = new JsonObject();
             raw.addProperty("v", 2);
             raw.addProperty("mc", mcVersion);
+            raw.add("portable", PortableItemCodec.encode(r.stacks(), r.portableShadow(), ops));
+            portableSnapshots.put(shadowKey(r.key(), r.pos()), raw.getAsJsonObject("portable").deepCopy());
             try {
                 var enc = Memory.CODEC.encodeStart(ops, r.detached());
                 if (enc.result().isPresent()) {
@@ -574,7 +602,7 @@ public class CMSyncManager {
                 client.execute(() -> handlePushResult(client, bankId, push.result(),
                         push.result() == CMSyncHttp.Result.SYNCED ? fullHash : prevHash,
                         false, push.note(), upsertCount, push.statusCode(), push.tookMs(),
-                        snapshotKeys, snapshotSyncEnder, deletedPairs));
+                        snapshotKeys, snapshotSyncEnder, deletedPairs, portableSnapshots));
                 if (push.result() == CMSyncHttp.Result.QUARANTINED) {
                     doPullBlocking(client, bankId, url, token, playerUuid, serverId, playerName, serverName, mcVersion, playerPos, dim, syncContainerNames, chatNotifications);
                     return;
@@ -590,7 +618,7 @@ public class CMSyncManager {
             LOGGER.error("cmsync job failed", ex);
             client.execute(() -> handlePushResult(client, bankId,
                     CMSyncHttp.Result.CONNECTION_FAILED, prevHash, false, "", lastPushedCount, -1, 0,
-                    null, snapshotSyncEnder, List.of()));
+                    null, snapshotSyncEnder, List.of(), null));
         }
     }
 
@@ -602,7 +630,9 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
                 playerUuid, playerName, serverId, serverName, mcVersion, MOD_VERSION);
         CMSyncHttp.PullOutcome pull;
         try {
+            int since = Math.max(0, CMSyncSettings.load(bankId).lastRevision);
             pull = CMSyncHttp.pull(url, token, serverId, playerUuid,
+                    since > 0 ? since : null,
                     playerPos.getX(), playerPos.getY(), playerPos.getZ(), dim).join();
         } catch (RuntimeException ex) {
             CMSyncLog.log("pull", "bank=" + bankId + " THREW: " + CMSyncLog.trunc(ex.getMessage(), 200));
@@ -614,8 +644,14 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
             if (!bankId.equals(activeBankId)) return;
             if (f.result() == CMSyncHttp.Result.SYNCED) {
                 // wipe first: merging pulled data into about-to-be-cleared locals is pointless
-                if (!applyServerGeneration(bankId, f.generation()))
+                boolean generationApplied = applyServerGeneration(bankId, f.generation());
+                if (!generationApplied)
                     applyPull(client, bankId, f.changes(), f.tombstones(), playerUuid, mcVersion, syncContainerNames);
+                if (!generationApplied && f.revision() >= 0) {
+                    CMSyncSettings s = CMSyncSettings.load(bankId);
+                    s.lastRevision = Math.max(s.lastRevision, f.revision());
+                    s.save(bankId);
+                }
                 if (!f.owners().isEmpty()) {
                     CMSyncSettings s = CMSyncSettings.load(bankId);
                     boolean changed = false;
@@ -633,7 +669,8 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
                 lastResult = "synced";
                 CMSyncLog.log("pull", "bank=" + bankId + " SYNCED changes=" + f.changes().size()
                         + " tombs=" + f.tombstones().size() + " containers=" + f.containers()
-                        + " gen=" + f.generation() + " owners=" + f.owners().size());
+                        + " gen=" + f.generation() + " rev=" + f.revision()
+                        + " owners=" + f.owners().size());
                 if (failing) {
                     failing = false;
                     sendChat(client, Component.literal("CMSync re-established"), ChatFormatting.GREEN);
@@ -666,6 +703,7 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
         Optional<MemoryBankImpl> opt = MemoryBankAccessImpl.INSTANCE.getLoadedInternal();
         if (opt.isEmpty() || !opt.get().getId().equals(bankId) || client.level == null) return;
         MemoryBankImpl bank = opt.get();
+        CMSyncSettings syncSettings = CMSyncSettings.load(bankId);
         long loadedTime = bank.getMetadata().getLoadedTime();
         long gameTime = client.level.getGameTime();
         DynamicOps<JsonElement> ops =
@@ -687,6 +725,9 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
                     ch.getAsJsonArray("items").forEach(e -> norm.add(e.getAsJsonObject()));
                 JsonObject raw = (ch.has("raw") && ch.get("raw").isJsonObject())
                         ? ch.getAsJsonObject("raw") : null;
+                JsonObject portableRaw = raw != null && raw.has("portable") && raw.get("portable").isJsonObject()
+                        ? raw.getAsJsonObject("portable") : null;
+                PortableItemCodec.Decoded portable = PortableItemCodec.decode(portableRaw, ops);
                 int v = 1;
                 try {
                     if (raw != null && raw.has("v")) v = raw.get("v").getAsInt();
@@ -733,6 +774,16 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
                         LOGGER.debug("cmsync: NBT decode failed, using names+counts fallback");
                     }
                 }
+                if (portable != null && !portable.stacks().isEmpty()) {
+                    if (mem != null) {
+                        mem = new Memory(portable.stacks(), mem.savedName(), mem.otherPositions(), mem.container(),
+                                nzL(mem.loadedTimestamp(), loadedTime), nzL(mem.inGameTimestamp(), gameTime),
+                                nzT(mem.realTimestamp()), null, null);
+                    } else {
+                        mem = new Memory(portable.stacks(), null, List.of(), Optional.empty(),
+                                loadedTime, gameTime, pulledAt != null ? pulledAt : Instant.now(), null, null);
+                    }
+                }
                 if (mem == null) {
                     // names+counts fallback (cross-version / legacy sender / NBT encode
                     // failure): nested contents (shulker boxes etc.) are LOST here, so
@@ -744,6 +795,9 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
                             loadedTime, gameTime, pulledAt != null ? pulledAt : Instant.now(), null, null);
                 }
                 bank.addMemoryPreservingTimestamp(key, pos, mem);
+                String storedShadowKey = shadowKey(key.toString(), ItemNormalizer.posToString(pos));
+                if (portable != null) syncSettings.portableShadows.put(storedShadowKey, portable.shadow().deepCopy());
+                else syncSettings.portableShadows.remove(storedShadowKey);
                 applied++;
 
                 // overrides ride with their entry; v2 senders without the blob explicitly cleared
@@ -777,6 +831,7 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
                 if (local != null && del != null && local.realTimestamp() != null
                         && local.realTimestamp().isAfter(del)) continue;
                 bank.removeMemory(kid, pos);
+                syncSettings.portableShadows.remove(shadowKey(kid.toString(), ItemNormalizer.posToString(pos)));
                 tombsApplied++;
             } catch (RuntimeException e) {
                 skipped++;
@@ -785,6 +840,7 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
         }
         CMSyncLog.log("merge", "bank=" + bankId + " applied=" + applied
                 + " tombs=" + tombsApplied + " skipped=" + skipped);
+        syncSettings.save(bankId);
     }
 
     private static boolean overrideStateEquals(@Nullable OverrideInfo local,
@@ -837,7 +893,8 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
                                    @Nullable String hash, boolean skipped, String note, int pushedCount,
                                    int statusCode, long tookMs,
                                    @Nullable Map<String, Set<String>> snapshotKeys,
-                                   boolean snapshotSyncEnder, List<PendingDelete> deletedPairs) {
+                                   boolean snapshotSyncEnder, List<PendingDelete> deletedPairs,
+                                   @Nullable Map<String, JsonObject> portableSnapshots) {
         if (!bankId.equals(activeBankId)) return;
         this.lastDetail = pushDetail(r, statusCode, tookMs, pushedCount, note);
         if (r == CMSyncHttp.Result.SYNCED) {
@@ -853,12 +910,18 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
                     settings.acknowledgedKeys.clear();
                     settings.acknowledgedKeys.putAll(copyKeySets(snapshotKeys));
                     settings.baselineSyncEnder = snapshotSyncEnder;
+                    if (portableSnapshots != null) {
+                        for (var e : portableSnapshots.entrySet()) {
+                            settings.portableShadows.put(e.getKey(), e.getValue().deepCopy());
+                        }
+                    }
                     for (PendingDelete deleted : deletedPairs) {
                         Map<String, String> positions = pendingDeletes.get(deleted.key());
                         if (positions != null && Objects.equals(positions.get(deleted.pos()), deleted.updatedAt())) {
                             positions.remove(deleted.pos());
                             if (positions.isEmpty()) pendingDeletes.remove(deleted.key());
                         }
+                        settings.portableShadows.remove(shadowKey(deleted.key(), deleted.pos()));
                     }
                     settings.pendingDeletes.clear();
                     for (var e : pendingDeletes.entrySet()) {
