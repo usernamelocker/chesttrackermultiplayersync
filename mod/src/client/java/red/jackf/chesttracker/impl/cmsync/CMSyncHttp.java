@@ -43,7 +43,9 @@ public class CMSyncHttp {
         /** /api/wipe succeeded — server data is zero, generation bumped. */
         WIPED,
         /** /api/wipe step 1 answered — confirm within 60s with the challenge. */
-        CONFIRM_REQUIRED
+        CONFIRM_REQUIRED,
+        /** The server generation changed while this push was being prepared. */
+        STALE_GENERATION
     }
 
     public record Identity(String playerUuid, String playerName, String serverId, String serverName,
@@ -136,10 +138,12 @@ public class CMSyncHttp {
     }
 
     public static CompletableFuture<PushOutcome> push(String baseUrl, String token, Identity ident,
-                                                      String baseHash, String fullHash, List<JsonObject> changes) {
+                                                      String baseHash, String fullHash, List<JsonObject> changes,
+                                                      int generation) {
         JsonObject body = ident.toJson();
         if (baseHash != null) body.addProperty("baseHash", baseHash);
         body.addProperty("fullHash", fullHash == null ? "" : fullHash);
+        body.addProperty("generation", generation);
         body.add("changes", GSON.toJsonTree(changes));
         HttpRequest req = base(baseUrl, "/api/push", token)
                 .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(body), StandardCharsets.UTF_8))
@@ -306,6 +310,14 @@ public class CMSyncHttp {
         if (code == 404 || code == 405 || code == 410 || code == 501) return Result.NOT_A_CMSYNC_SERVER;
         if (code == 401 || code == 403) return Result.ACCESS_DENIED;
         if (code == 422) return Result.VALIDATION_ERROR;
+        if (code == 409) {
+            try {
+                JsonElement el = JsonParser.parseString(resp.body());
+                if (el.isJsonObject() && "STALE_GENERATION".equalsIgnoreCase(
+                        el.getAsJsonObject().get("status").getAsString())) return Result.STALE_GENERATION;
+            } catch (RuntimeException ignored) {
+            }
+        }
         if (code < 200 || code >= 300) return Result.CONNECTION_FAILED;
         try {
             JsonElement el = JsonParser.parseString(resp.body());

@@ -18,7 +18,7 @@ import db
 from models import Change, HandshakeRequest, PushRequest
 
 app = FastAPI(title="CMSync", version="2.0.0")
-CMSYNC_SERVER = "2.3"  # bump on any server behavior change; visible in /health
+CMSYNC_SERVER = "2.4"  # bump on any server behavior change; visible in /health
 _log = logging.getLogger("cmsync")
 # Explicit handler: uvicorn's default config leaves the root logger handler-less,
 # so INFO records would silently vanish (only WARNING+ reaches stderr).
@@ -127,9 +127,20 @@ def push(req: PushRequest, x_cmsync_token: str | None = Header(default=None, ali
 
     changes = [c.model_dump() for c in req.changes]
     with _con() as con:
-        db.record_owners(con, sid, changes, req.playerUuid, req.playerName)
         existing = db.container_count(con, sid)
         deletes = sum(1 for c in changes if c.get("deleted"))
+        current_generation = db.get_generation(con, sid)
+        if req.generation is not None and req.generation != current_generation:
+            _log.warning("STALE GENERATION %s: client=%s server=%s player=%s",
+                         sid, req.generation, current_generation, req.playerUuid)
+            return JSONResponse(status_code=409, content={
+                "status": "STALE_GENERATION",
+                "reason": "server generation changed; pull before pushing",
+                "generation": current_generation,
+                "containers": existing,
+            })
+
+        db.record_owners(con, sid, changes, req.playerUuid, req.playerName)
 
         # Hub-wipe protection: empty push against non-empty server = ignore, keep snapshot.
         if not changes and existing > 0:
@@ -240,10 +251,10 @@ def restore(body: dict, x_cmsync_token: str | None = Header(default=None, alias=
 
 
 # Two-step wipe: POST {confirm:false} -> challenge, then POST {confirm:true, challenge}.
-# Requires ADMIN_TOKEN (wipe stays disabled while it is empty). Snapshots are kept
-# as the recovery path; memories, tombstones and owners go to zero and the wipe
-# generation bumps so connected (and later returning) clients clear their locals too.
-_pending_wipes: dict[str, tuple[str, float]] = {}
+# Challenges live in SQLite because this service runs with multiple Uvicorn workers.
+# Snapshots are kept as the recovery path; memories, tombstones and owners go to
+# zero and the wipe generation bumps so connected (and later returning) clients
+# clear their locals too.
 
 
 @app.post("/api/wipe")
@@ -256,17 +267,32 @@ def wipe(body: dict, x_cmsync_token: str | None = Header(default=None, alias="X-
     with _con() as con:
         if not body.get("confirm"):
             challenge = secrets.token_hex(16)
-            _pending_wipes[sid] = (challenge, time.time() + 60)
-            return {"status": "CONFIRM_REQUIRED", "challenge": challenge,
+            entry = db.start_wipe_challenge(con, sid, challenge, time.time() + 60)
+            if entry["state"] == "completed" and entry.get("result"):
+                result = json.loads(entry["result"])
+                result.update({"status": "WIPED"})
+                return result
+            return {"status": "CONFIRM_REQUIRED", "challenge": entry["challenge"],
                     "containers": db.container_count(con, sid),
                     "warning": ("This deletes ALL stored item data for this server "
                                 "(memories, deletes, owners). Snapshots are kept.")}
 
-        pend = _pending_wipes.pop(sid, None)
-        if not pend or pend[0] != body.get("challenge") or time.time() > pend[1]:
+        challenge = body.get("challenge")
+        claim = db.claim_wipe_challenge(con, sid, challenge or "")
+        if not claim:
             return JSONResponse(status_code=400, content={"status": "BAD_CHALLENGE",
                                "reason": "stale or wrong challenge; start over"})
+        if claim["state"] == "completed" and claim.get("result"):
+            result = json.loads(claim["result"])
+            result.update({"status": "WIPED"})
+            return result
+        if claim["state"] == "running":
+            return JSONResponse(status_code=409, content={
+                "status": "WIPE_IN_PROGRESS",
+                "reason": "wipe is already being processed; retry shortly",
+            })
         result = db.wipe_server(con, sid)
+        db.complete_wipe_challenge(con, sid, challenge, result)
         result.update({"status": "WIPED"})
         _log.warning("WIPE %s by %s: %s", sid, body.get("playerUuid"), result)
         return result

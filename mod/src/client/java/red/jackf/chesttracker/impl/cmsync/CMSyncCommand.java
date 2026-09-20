@@ -11,6 +11,8 @@ import red.jackf.jackfredlib.client.api.gps.Coordinate;
 
 import java.time.Duration;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 /**
  * /cmsync status | stop | wipealldata [confirm]. Connecting happens in the Memory Bank menu (CMSync tab).
@@ -130,7 +132,7 @@ public class CMSyncCommand {
                                 + (throwable != null ? "connection failed" : first.result())));
                         return;
                     }
-                    CMSyncHttp.wipe(url, token, ident, true, first.challenge()).whenComplete((out, throwable2) ->
+                    confirmWipeWithRetry(url, token, ident, first.challenge(), 4).whenComplete((out, throwable2) ->
                             source.getClient().execute(() -> {
                                 if (throwable2 != null || out.result() != CMSyncHttp.Result.WIPED) {
                                     CMSyncLog.log("wipe", "step2 confirm FAILED: "
@@ -148,6 +150,22 @@ public class CMSyncCommand {
                             }));
                 }));
         return 1;
+    }
+
+    /**
+     * A reverse proxy can lose the response while the server is still wiping.
+     * The challenge is durable and idempotent server-side, so retry the same
+     * confirmation instead of asking the operator to start a new two-step flow.
+     */
+    private static CompletableFuture<CMSyncHttp.WipeOutcome> confirmWipeWithRetry(
+            String url, String token, CMSyncHttp.Identity ident, String challenge, int attempts) {
+        return CMSyncHttp.wipe(url, token, ident, true, challenge).thenCompose(out -> {
+            if (out.result() != CMSyncHttp.Result.CONNECTION_FAILED || attempts <= 1)
+                return CompletableFuture.completedFuture(out);
+            return CompletableFuture.runAsync(() -> {
+            }, CompletableFuture.delayedExecutor(750, TimeUnit.MILLISECONDS))
+                    .thenCompose(ignored -> confirmWipeWithRetry(url, token, ident, challenge, attempts - 1));
+        });
     }
 
     private static int stop(FabricClientCommandSource source) {

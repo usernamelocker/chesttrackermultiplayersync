@@ -30,6 +30,9 @@ class Change(BaseModel):
 class PushRequest(Identity):
     baseHash: Optional[str] = None
     fullHash: str = ""
+    # Current clients echo the generation learned during handshake/pull. Older
+    # protocol peers may omit it; when present it is a hard stale-wipe guard.
+    generation: Optional[int] = Field(default=None, ge=0)
     changes: list[Change] = []
 
 class HandshakeRequest(Identity):

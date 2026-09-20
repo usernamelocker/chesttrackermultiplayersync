@@ -386,6 +386,7 @@ public class CMSyncManager {
         final String serverId = canonicalWireId(coord.id());
         final String serverName = coord.userFriendlyName();
         final String mcVersion = gameVersion();
+        final int serverGeneration = Math.max(0, settings.generation);
         final DynamicOps<JsonElement> ops =
                 client.level.registryAccess().createSerializationContext(JsonOps.INSTANCE);
         // player position lets the server withhold far-away containers (range gate)
@@ -441,7 +442,8 @@ public class CMSyncManager {
             try {
                 runSyncJob(client, bankId, url, token, playerUuid, playerName,
                         serverId, serverName, mcVersion, ops, snapshot, playerPos, dim,
-                        deletedPairs, snapshotKeys, snapshotSyncEnder, syncContainerNames, chatNotifications);
+                        deletedPairs, snapshotKeys, snapshotSyncEnder, syncContainerNames, chatNotifications,
+                        serverGeneration);
             } finally {
                 CMSyncQueue.release();
             }
@@ -464,7 +466,7 @@ public class CMSyncManager {
                              BlockPos playerPos, String dim,
                              List<PendingDelete> deletedPairs, Map<String, Set<String>> snapshotKeys,
                              boolean snapshotSyncEnder,
-                             boolean syncContainerNames, boolean chatNotifications) {
+                             boolean syncContainerNames, boolean chatNotifications, int serverGeneration) {
         List<JsonObject> changes = new ArrayList<>(snapshot.size());
         List<JsonObject> hashProj = new ArrayList<>(snapshot.size());
         Map<String, JsonObject> portableSnapshots = new HashMap<>();
@@ -581,7 +583,8 @@ public class CMSyncManager {
 
         try {
             if (dirty && !emptyLocal) {
-                CMSyncHttp.PushOutcome push = CMSyncHttp.push(url, token, ident, prevHash, fullHash, changes).join();
+                CMSyncHttp.PushOutcome push = CMSyncHttp.push(url, token, ident, prevHash, fullHash, changes,
+                        serverGeneration).join();
                 CMSyncLog.log("push", "bank=" + bankId + " result=" + push.result()
                         + " http=" + push.statusCode() + " ms=" + push.tookMs()
                         + " upserts=" + upsertCount + " deletes=" + deletedPairs.size()
@@ -943,6 +946,12 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
             quietUntilMs = 0;
             CMSyncLog.log("quarantine", "bank=" + bankId + " held mass-delete: " + CMSyncLog.trunc(note, 200));
             sendChat(client, Component.literal("CMSync held mass-delete: " + note), ChatFormatting.YELLOW);
+        } else if (r == CMSyncHttp.Result.STALE_GENERATION) {
+            lastResult = "server generation changed";
+            consecutiveConnFails = 0;
+            quietUntilMs = 0;
+            CMSyncLog.log("push", "stale server generation; pull will clear local state"
+                    + (note == null || note.isEmpty() ? "" : " note=" + CMSyncLog.trunc(note, 160)));
         } else {
             lastResult = r.name();
             if (r == CMSyncHttp.Result.CONNECTION_FAILED) {
