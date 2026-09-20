@@ -19,6 +19,7 @@ os.environ["DB_PATH"] = os.path.join(_tmp, "t.db")
 sys.path.insert(0, os.path.dirname(__file__))
 from fastapi.testclient import TestClient  # noqa: E402
 import app  # noqa: E402
+import db  # noqa: E402
 
 c = TestClient(app.app)
 ALICE = "11111111-1111-1111-1111-111111111111"
@@ -27,10 +28,13 @@ SID = "multiplayer/mc_test"
 
 
 def ident(uuid, mc="1.21.11", sid=SID, generation=None):
+    if generation is None:
+        con = db.connect(os.environ["DB_PATH"])
+        generation = db.get_generation(con, app.config.canonical_server_id(sid))
+        con.close()
     result = {"protocolVersion": 2, "playerUuid": uuid, "playerName": "T",
               "serverId": sid, "serverName": "T", "mcVersion": mc, "modVersion": "cmsync.1"}
-    if generation is not None:
-        result["generation"] = generation
+    result["generation"] = generation
     return result
 
 
@@ -153,9 +157,7 @@ config.SERVER_ID_ALIASES = {ALIAS}
 
 
 def fident(uuid, sid):
-    d = ident(uuid)
-    d["serverId"] = sid
-    return d
+    return ident(uuid, sid=sid)
 
 
 r = c.post("/api/handshake", json=fident(STRANGER, ALIAS), headers=TOK).json()

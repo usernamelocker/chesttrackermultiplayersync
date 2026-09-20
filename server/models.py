@@ -30,9 +30,10 @@ class Change(BaseModel):
 class PushRequest(Identity):
     baseHash: Optional[str] = None
     fullHash: str = ""
-    # Current clients echo the generation learned during handshake/pull. Older
-    # protocol peers may omit it; when present it is a hard stale-wipe guard.
-    generation: Optional[int] = Field(default=None, ge=0)
+    # Every v2 push must echo the generation learned during handshake/pull.
+    # Omitting it is rejected so old clients fail safely instead of resurrecting
+    # data after an offline wipe.
+    generation: int = Field(..., ge=0)
     changes: list[Change] = []
 
 class HandshakeRequest(Identity):
