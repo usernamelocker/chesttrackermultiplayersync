@@ -71,6 +71,8 @@ public class CMSyncManager {
     // Null = needs a baseline (fresh session or filter toggle), never a mass delete.
     @Nullable private Map<String, Set<String>> lastSnapshotKeys = null;
     @Nullable private Boolean lastSyncEnder = null;
+    /** Deletes detected locally and not yet confirmed by a successful push. */
+    private final Map<String, Map<String, String>> pendingDeletes = new HashMap<>();
     private boolean emptyHoldNotified = false;
     @Nullable private String lastWarnedDeletes = null;
 
@@ -95,6 +97,7 @@ public class CMSyncManager {
     public void markActivated(String bankId, String serverId) {
         resetSession();
         this.activeBankId = bankId;
+        loadPersistedSyncState(bankId);
         CMSyncLog.log("session", "activated bank=" + bankId + " server=" + serverId + " mod=" + MOD_VERSION);
     }
 
@@ -158,6 +161,9 @@ public class CMSyncManager {
         CMSyncSettings s = CMSyncSettings.load(bankId);
         if (generation <= s.generation) return false;
         s.generation = generation;
+        s.acknowledgedKeys.clear();
+        s.pendingDeletes.clear();
+        s.baselineSyncEnder = null;
         s.save(bankId);
         CMSyncLog.log("wipe", "bank=" + bankId + " applied server generation " + generation + ", locals cleared");
         MemoryBankAccessImpl.INSTANCE.getLoadedInternal().ifPresent(bank -> {
@@ -167,6 +173,8 @@ public class CMSyncManager {
         });
         this.lastPushHash = null;
         this.lastSnapshotKeys = null;
+        this.lastSyncEnder = null;
+        this.pendingDeletes.clear();
         this.lastPushedCount = -1;
         this.emptyHoldNotified = false;
         this.lastWarnedDeletes = null;
@@ -186,12 +194,40 @@ public class CMSyncManager {
         this.quietUntilMs = 0;
         this.lastSnapshotKeys = null;
         this.lastSyncEnder = null;
+        this.pendingDeletes.clear();
         this.emptyHoldNotified = false;
         this.lastWarnedDeletes = null;
         this.lastSuccess = null;
         this.lastResult = null;
         this.lastDetail = null;
         this.lastTickNote = null;
+    }
+
+    private void loadPersistedSyncState(String bankId) {
+        CMSyncSettings settings = CMSyncSettings.load(bankId);
+        this.lastSnapshotKeys = settings.baselineSyncEnder == null
+                ? null : copyKeySets(settings.acknowledgedKeys);
+        this.lastSyncEnder = settings.baselineSyncEnder;
+        this.pendingDeletes.clear();
+        for (var e : settings.pendingDeletes.entrySet()) {
+            this.pendingDeletes.put(e.getKey(), new HashMap<>(e.getValue()));
+        }
+    }
+
+    private static Map<String, Set<String>> copyKeySets(Map<String, Set<String>> source) {
+        Map<String, Set<String>> copy = new HashMap<>();
+        for (var e : source.entrySet()) copy.put(e.getKey(), new HashSet<>(e.getValue()));
+        return copy;
+    }
+
+    private static boolean isSyncablePendingKey(String key, boolean syncEnder) {
+        try {
+            Identifier id = Identifier.parse(key);
+            return !EnderChestKeys.isHiddenLegacyKey(id)
+                    && (syncEnder || !EnderChestKeys.isSyncableEnderKey(id));
+        } catch (RuntimeException ignored) {
+            return false;
+        }
     }
 
     /** Throttled guard logging: a stall logs once until a sync cycle dispatches. */
@@ -239,6 +275,7 @@ public class CMSyncManager {
         if (!bank.getId().equals(activeBankId)) {
             resetSession();
             this.activeBankId = bank.getId();
+            loadPersistedSyncState(bank.getId());
             sendChat(client, Component.literal("CMSync resumed"), ChatFormatting.GREEN);
         }
 
@@ -255,26 +292,50 @@ public class CMSyncManager {
         // containers bypass the transport backoff below so ghosts vanish promptly
         // instead of waiting out a cooldown. Never fires on a fresh baseline, an
         // empty bank (hub-wipe safety), or a filter-toggle tick.
-        List<String[]> deletedPairs = new ArrayList<>();
+        List<PendingDelete> deletedPairs = new ArrayList<>();
         Map<String, Set<String>> curKeys = new HashMap<>();
+        Map<String, Map<String, Instant>> curObservations = new HashMap<>();
         for (Map.Entry<Identifier, MemoryKeyImpl> e : bank.getMemories().entrySet()) {
             if (EnderChestKeys.isHiddenLegacyKey(e.getKey())) continue;
             if (!syncEnder && EnderChestKeys.isSyncableEnderKey(e.getKey())) continue;
             Set<String> set = new HashSet<>();
+            Map<String, Instant> observations = new HashMap<>();
             for (Map.Entry<BlockPos, Memory> m : e.getValue().getMemories().entrySet()) {
                 // must mirror the copy loop's entity skip exactly, or phantom deletes appear
                 if (m.getValue().entityId() != null) continue;
-                set.add(ItemNormalizer.posToString(m.getKey()));
+                String pos = ItemNormalizer.posToString(m.getKey());
+                set.add(pos);
+                if (m.getValue().realTimestamp() != null) observations.put(pos, m.getValue().realTimestamp());
             }
-            curKeys.put(e.getKey().toString(), set);
+            String key = e.getKey().toString();
+            curKeys.put(key, set);
+            curObservations.put(key, observations);
         }
         if (lastSnapshotKeys != null && Objects.equals(lastSyncEnder, syncEnder)) {
             for (var e : lastSnapshotKeys.entrySet()) {
                 Set<String> cur = curKeys.getOrDefault(e.getKey(), Set.of());
                 for (String pos : e.getValue()) {
-                    if (!cur.contains(pos)) deletedPairs.add(new String[]{e.getKey(), pos});
+                    if (!cur.contains(pos)) {
+                        pendingDeletes.computeIfAbsent(e.getKey(), ignored -> new HashMap<>())
+                                .putIfAbsent(pos, Instant.now().toString());
+                    }
                 }
             }
+        }
+        for (Iterator<Map.Entry<String, Map<String, String>>> keys = pendingDeletes.entrySet().iterator(); keys.hasNext();) {
+            var keyEntry = keys.next();
+            Map<String, Instant> observations = curObservations.getOrDefault(keyEntry.getKey(), Map.of());
+            for (Iterator<Map.Entry<String, String>> positions = keyEntry.getValue().entrySet().iterator(); positions.hasNext();) {
+                var position = positions.next();
+                Instant current = observations.get(position.getKey());
+                Instant deleted = ItemNormalizer.parseInstant(position.getValue());
+                if (current != null && deleted != null && current.isAfter(deleted)) positions.remove();
+            }
+            if (keyEntry.getValue().isEmpty()) keys.remove();
+        }
+        for (var e : pendingDeletes.entrySet()) {
+            if (!isSyncablePendingKey(e.getKey(), syncEnder)) continue;
+            for (var p : e.getValue().entrySet()) deletedPairs.add(new PendingDelete(e.getKey(), p.getKey(), p.getValue()));
         }
         // backing off after transport failures — unless deletes are pending
         boolean quietBypass = now < quietUntilMs && !deletedPairs.isEmpty();
@@ -283,9 +344,12 @@ public class CMSyncManager {
         if (!CMSyncQueue.tryClaim()) return;
         lastAttemptMs = now;
         lastTickNote = null;
-        lastSnapshotKeys = curKeys;
-        lastSyncEnder = syncEnder;
-        final String deleteStamp = Instant.now().toString();
+        CMSyncSettings pendingSettings = CMSyncSettings.load(bank.getId());
+        pendingSettings.pendingDeletes.clear();
+        for (var e : pendingDeletes.entrySet()) pendingSettings.pendingDeletes.put(e.getKey(), new HashMap<>(e.getValue()));
+        pendingSettings.save(bank.getId());
+        final Map<String, Set<String>> snapshotKeys = copyKeySets(curKeys);
+        final boolean snapshotSyncEnder = syncEnder;
 
         // ---- fast copy on client thread (no Gson, no codec, no HTTP) ----
         final String bankId = bank.getId();
@@ -353,7 +417,7 @@ public class CMSyncManager {
             try {
                 runSyncJob(client, bankId, url, token, playerUuid, playerName,
                         serverId, serverName, mcVersion, ops, snapshot, playerPos, dim,
-                        deletedPairs, deleteStamp, syncContainerNames, chatNotifications);
+                        deletedPairs, snapshotKeys, snapshotSyncEnder, syncContainerNames, chatNotifications);
             } finally {
                 CMSyncQueue.release();
             }
@@ -365,13 +429,17 @@ public class CMSyncManager {
                             @Nullable String ovName, String ovMode, boolean hasOv) {
     }
 
+    private record PendingDelete(String key, String pos, String updatedAt) {
+    }
+
     /** Background lane: encode NBT + hash + push + pull (blocking). Merge on client thread. */
     private void runSyncJob(Minecraft client, String bankId, String url, String token,
-                            String playerUuid, String playerName, String serverId, String serverName,
-                            String mcVersion, DynamicOps<JsonElement> ops, List<RawEntry> snapshot,
-                            BlockPos playerPos, String dim,
-                            List<String[]> deletedPairs, String deleteStamp,
-                            boolean syncContainerNames, boolean chatNotifications) {
+                             String playerUuid, String playerName, String serverId, String serverName,
+                             String mcVersion, DynamicOps<JsonElement> ops, List<RawEntry> snapshot,
+                             BlockPos playerPos, String dim,
+                             List<PendingDelete> deletedPairs, Map<String, Set<String>> snapshotKeys,
+                             boolean snapshotSyncEnder,
+                             boolean syncContainerNames, boolean chatNotifications) {
         List<JsonObject> changes = new ArrayList<>(snapshot.size());
         List<JsonObject> hashProj = new ArrayList<>(snapshot.size());
         int memBlobs = 0;
@@ -430,17 +498,17 @@ public class CMSyncManager {
                 + "/" + upsertCount + " missing=" + missingBlobs + " blobBytes=" + memBlobBytes);
 
         // append propagated deletes (broken/emptied since last snapshot)
-        for (String[] del : deletedPairs) {
+        for (PendingDelete del : deletedPairs) {
             JsonObject ch = new JsonObject();
-            ch.addProperty("key", del[0]);
-            ch.addProperty("pos", del[1]);
+            ch.addProperty("key", del.key());
+            ch.addProperty("pos", del.pos());
             ch.addProperty("deleted", true);
-            ch.addProperty("updatedAt", deleteStamp);
+            ch.addProperty("updatedAt", del.updatedAt());
             ch.addProperty("updatedBy", playerUuid);
             ch.addProperty("mcVersion", mcVersion);
             ch.add("items", new com.google.gson.JsonArray());
             changes.add(ch);
-            hashProj.add(ItemNormalizer.projection(del[0], del[1], true, List.of(), null,
+            hashProj.add(ItemNormalizer.projection(del.key(), del.pos(), true, List.of(), null,
                     ManualMode.DEFAULT.name()));
         }
         final String fullHash = ItemNormalizer.hashProjections(hashProj);
@@ -505,7 +573,8 @@ public class CMSyncManager {
                 }
                 client.execute(() -> handlePushResult(client, bankId, push.result(),
                         push.result() == CMSyncHttp.Result.SYNCED ? fullHash : prevHash,
-                        false, push.note(), upsertCount, push.statusCode(), push.tookMs()));
+                        false, push.note(), upsertCount, push.statusCode(), push.tookMs(),
+                        snapshotKeys, snapshotSyncEnder, deletedPairs));
                 if (push.result() == CMSyncHttp.Result.QUARANTINED) {
                     doPullBlocking(client, bankId, url, token, playerUuid, serverId, playerName, serverName, mcVersion, playerPos, dim, syncContainerNames, chatNotifications);
                     return;
@@ -520,7 +589,8 @@ public class CMSyncManager {
         } catch (RuntimeException ex) {
             LOGGER.error("cmsync job failed", ex);
             client.execute(() -> handlePushResult(client, bankId,
-                    CMSyncHttp.Result.CONNECTION_FAILED, prevHash, false, "", lastPushedCount, -1, 0));
+                    CMSyncHttp.Result.CONNECTION_FAILED, prevHash, false, "", lastPushedCount, -1, 0,
+                    null, snapshotSyncEnder, List.of()));
         }
     }
 
@@ -672,7 +742,7 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
                     mem = new Memory(ItemNormalizer.fromNormList(norm), null, List.of(), Optional.empty(),
                             loadedTime, gameTime, pulledAt != null ? pulledAt : Instant.now(), null, null);
                 }
-                bank.addMemory(key, pos, mem);
+                bank.addMemoryPreservingTimestamp(key, pos, mem);
                 applied++;
 
                 // overrides ride with their entry; v2 senders without the blob explicitly cleared
@@ -763,8 +833,10 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
     }
 
     private void handlePushResult(Minecraft client, String bankId, CMSyncHttp.Result r,
-                                  @Nullable String hash, boolean skipped, String note, int pushedCount,
-                                  int statusCode, long tookMs) {
+                                   @Nullable String hash, boolean skipped, String note, int pushedCount,
+                                   int statusCode, long tookMs,
+                                   @Nullable Map<String, Set<String>> snapshotKeys,
+                                   boolean snapshotSyncEnder, List<PendingDelete> deletedPairs) {
         if (!bankId.equals(activeBankId)) return;
         this.lastDetail = pushDetail(r, statusCode, tookMs, pushedCount, note);
         if (r == CMSyncHttp.Result.SYNCED) {
@@ -773,6 +845,26 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
                 lastPushedCount = pushedCount;
                 lastSuccess = Instant.now();
                 lastResult = "synced";
+                if (snapshotKeys != null) {
+                    lastSnapshotKeys = copyKeySets(snapshotKeys);
+                    lastSyncEnder = snapshotSyncEnder;
+                    CMSyncSettings settings = CMSyncSettings.load(bankId);
+                    settings.acknowledgedKeys.clear();
+                    settings.acknowledgedKeys.putAll(copyKeySets(snapshotKeys));
+                    settings.baselineSyncEnder = snapshotSyncEnder;
+                    for (PendingDelete deleted : deletedPairs) {
+                        Map<String, String> positions = pendingDeletes.get(deleted.key());
+                        if (positions != null && Objects.equals(positions.get(deleted.pos()), deleted.updatedAt())) {
+                            positions.remove(deleted.pos());
+                            if (positions.isEmpty()) pendingDeletes.remove(deleted.key());
+                        }
+                    }
+                    settings.pendingDeletes.clear();
+                    for (var e : pendingDeletes.entrySet()) {
+                        settings.pendingDeletes.put(e.getKey(), new HashMap<>(e.getValue()));
+                    }
+                    settings.save(bankId);
+                }
             }
             deterministicNote = null;
             deterministicUntilMs = 0;

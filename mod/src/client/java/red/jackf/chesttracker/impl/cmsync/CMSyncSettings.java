@@ -11,7 +11,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Per-bank CMSync state. Sidecar file (no Metadata.CODEC edit required):
@@ -40,6 +42,12 @@ public class CMSyncSettings {
     public int generation = 0;
     /** Teammate uuid -> last seen name (for ender chest profiles). Refreshed on every pull. */
     public final Map<String, String> ownerNames = new HashMap<>();
+    /** Last local key baseline whose push was acknowledged by the server. */
+    public final Map<String, Set<String>> acknowledgedKeys = new HashMap<>();
+    /** Observation timestamps for deletes detected but not yet acknowledged. */
+    public final Map<String, Map<String, String>> pendingDeletes = new HashMap<>();
+    /** Null means no acknowledged baseline exists yet. */
+    @Nullable public Boolean baselineSyncEnder = null;
 
     public boolean isActive() {
         return enabled && url != null && !paused;
@@ -55,6 +63,9 @@ public class CMSyncSettings {
         boundServerId = null;
         enabled = false;
         paused = false;
+        acknowledgedKeys.clear();
+        pendingDeletes.clear();
+        baselineSyncEnder = null;
     }
 
     // ---- persistence ----
@@ -96,6 +107,38 @@ public class CMSyncSettings {
                     }
                 }
             }
+            if (o.has("acknowledgedKeys") && o.get("acknowledgedKeys").isJsonObject()) {
+                for (var e : o.getAsJsonObject("acknowledgedKeys").entrySet()) {
+                    try {
+                        Set<String> positions = new HashSet<>();
+                        if (e.getValue().isJsonArray()) {
+                            e.getValue().getAsJsonArray().forEach(v -> positions.add(v.getAsString()));
+                        }
+                        st.acknowledgedKeys.put(e.getKey(), positions);
+                    } catch (RuntimeException ignored) {
+                    }
+                }
+            }
+            if (o.has("pendingDeletes") && o.get("pendingDeletes").isJsonObject()) {
+                for (var e : o.getAsJsonObject("pendingDeletes").entrySet()) {
+                    try {
+                        Map<String, String> positions = new HashMap<>();
+                        if (e.getValue().isJsonObject()) {
+                            for (var position : e.getValue().getAsJsonObject().entrySet()) {
+                                if (!position.getValue().isJsonNull()) positions.put(position.getKey(), position.getValue().getAsString());
+                            }
+                        }
+                        st.pendingDeletes.put(e.getKey(), positions);
+                    } catch (RuntimeException ignored) {
+                    }
+                }
+            }
+            if (o.has("baselineSyncEnder") && !o.get("baselineSyncEnder").isJsonNull()) {
+                try {
+                    st.baselineSyncEnder = o.get("baselineSyncEnder").getAsBoolean();
+                } catch (RuntimeException ignored) {
+                }
+            }
             return st;
         } catch (IOException | RuntimeException e) {
             return new CMSyncSettings();
@@ -120,6 +163,22 @@ public class CMSyncSettings {
             JsonObject owners = new JsonObject();
             for (var e : ownerNames.entrySet()) owners.addProperty(e.getKey(), e.getValue());
             o.add("ownerNames", owners);
+            JsonObject baseline = new JsonObject();
+            for (var e : acknowledgedKeys.entrySet()) {
+                var positions = new com.google.gson.JsonArray();
+                for (String pos : e.getValue()) positions.add(pos);
+                baseline.add(e.getKey(), positions);
+            }
+            o.add("acknowledgedKeys", baseline);
+            JsonObject pending = new JsonObject();
+            for (var e : pendingDeletes.entrySet()) {
+                JsonObject positions = new JsonObject();
+                for (var p : e.getValue().entrySet()) positions.addProperty(p.getKey(), p.getValue());
+                pending.add(e.getKey(), positions);
+            }
+            o.add("pendingDeletes", pending);
+            if (baselineSyncEnder == null) o.add("baselineSyncEnder", com.google.gson.JsonNull.INSTANCE);
+            else o.addProperty("baselineSyncEnder", baselineSyncEnder);
             Files.writeString(pathFor(bankId), GSON.toJson(o), StandardCharsets.UTF_8);
         } catch (IOException ignored) {
         }
