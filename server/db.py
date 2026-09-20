@@ -34,6 +34,29 @@ CREATE TABLE IF NOT EXISTS snapshots(
   payload TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);
+CREATE TABLE IF NOT EXISTS change_events(
+  server_id TEXT NOT NULL,
+  revision INTEGER NOT NULL,
+  key TEXT NOT NULL,
+  pos TEXT NOT NULL,
+  deleted INTEGER NOT NULL,
+  payload TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  PRIMARY KEY(server_id, revision)
+);
+CREATE INDEX IF NOT EXISTS change_events_server_revision
+  ON change_events(server_id, revision);
+CREATE TABLE IF NOT EXISTS pull_sessions(
+  server_id TEXT NOT NULL,
+  client_id TEXT NOT NULL,
+  dim TEXT,
+  px INTEGER,
+  py INTEGER,
+  pz INTEGER,
+  revision INTEGER NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  PRIMARY KEY(server_id, client_id)
+);
 CREATE TABLE IF NOT EXISTS key_owners(
   server_id TEXT NOT NULL,
   key TEXT NOT NULL,
@@ -95,6 +118,27 @@ def _logical_version(con: sqlite3.Connection, server_id: str, key: str, pos: str
     ).fetchone()
     return row["version"] if row and row["version"] is not None else None
 
+def get_revision(con: sqlite3.Connection, server_id: str) -> int:
+    row = con.execute("SELECT v FROM meta WHERE k=?", (f"rev:{server_id}",)).fetchone()
+    try:
+        return int(row["v"]) if row else 0
+    except (ValueError, TypeError):
+        return 0
+
+def _append_event(con: sqlite3.Connection, server_id: str, change: dict) -> int:
+    revision = get_revision(con, server_id) + 1
+    con.execute("INSERT INTO meta(k,v) VALUES(?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
+                (f"rev:{server_id}", str(revision)))
+    payload = dict(change)
+    payload.setdefault("deleted", False)
+    payload.setdefault("items", [])
+    con.execute(
+        "INSERT INTO change_events(server_id,revision,key,pos,deleted,payload) VALUES(?,?,?,?,?,?)",
+        (server_id, revision, payload["key"], payload["pos"],
+         1 if payload.get("deleted") else 0, json.dumps(payload)),
+    )
+    return revision
+
 def apply_changes(con: sqlite3.Connection, server_id: str, changes: list[dict]) -> dict:
     """LWW per (key,pos). Returns {applied, skipped_stale}."""
     applied = skipped = 0
@@ -109,6 +153,7 @@ def apply_changes(con: sqlite3.Connection, server_id: str, changes: list[dict]) 
             con.execute("DELETE FROM memories WHERE server_id=? AND key=? AND pos=?", (server_id, key, pos))
             con.execute("INSERT OR REPLACE INTO tombstones(server_id,key,pos,deleted_at,deleted_by) VALUES(?,?,?,?,?)",
                         (server_id, key, pos, c["updatedAt"], c.get("updatedBy")))
+            _append_event(con, server_id, c)
         else:
             con.execute("DELETE FROM tombstones WHERE server_id=? AND key=? AND pos=?", (server_id, key, pos))
             con.execute(
@@ -132,6 +177,7 @@ def apply_changes(con: sqlite3.Connection, server_id: str, changes: list[dict]) 
                     c["updatedAt"],
                 ),
             )
+            _append_event(con, server_id, c)
         applied += 1
     con.commit()
     return {"applied": applied, "skipped_stale": skipped}
@@ -156,8 +202,23 @@ def restore_snapshot(con: sqlite3.Connection, server_id: str, snapshot_id: int) 
     if not row:
         raise KeyError("snapshot not found")
     state: dict = json.loads(row["payload"])
+    old_memories = con.execute(
+        "SELECT key,pos,items_norm,raw,mc_version,updated_by,updated_at FROM memories WHERE server_id=?",
+        (server_id,),
+    ).fetchall()
+    old_tombstones = con.execute(
+        "SELECT key,pos,deleted_at,deleted_by FROM tombstones WHERE server_id=?", (server_id,)
+    ).fetchall()
     con.execute("DELETE FROM memories WHERE server_id=?", (server_id,))
     con.execute("DELETE FROM tombstones WHERE server_id=?", (server_id,))
+    for mem in old_memories:
+        _append_event(con, server_id, {"key": mem["key"], "pos": mem["pos"], "deleted": True,
+                                       "updatedAt": mem["updated_at"], "updatedBy": mem["updated_by"],
+                                       "items": []})
+    for tomb in old_tombstones:
+        _append_event(con, server_id, {"key": tomb["key"], "pos": tomb["pos"], "deleted": True,
+                                       "updatedAt": tomb["deleted_at"], "updatedBy": tomb["deleted_by"],
+                                       "items": []})
     n = 0
     for key, positions in state.items():
         for pos, mem in positions.items():
@@ -166,6 +227,11 @@ def restore_snapshot(con: sqlite3.Connection, server_id: str, snapshot_id: int) 
                         (server_id, key, pos, json.dumps(mem.get("items", [])),
                          json.dumps(mem["raw"]) if mem.get("raw") is not None else None,
                          mem.get("mcVersion"), mem.get("updatedBy"), mem.get("updatedAt", "1970-01-01T00:00:00Z")))
+            _append_event(con, server_id, {"key": key, "pos": pos, "deleted": False,
+                                           "updatedAt": mem.get("updatedAt", "1970-01-01T00:00:00Z"),
+                                           "updatedBy": mem.get("updatedBy"),
+                                           "mcVersion": mem.get("mcVersion"),
+                                           "items": mem.get("items", []), "raw": mem.get("raw")})
             n += 1
     con.execute("INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)",
                 (f"gen:{server_id}", str(get_generation(con, server_id) + 1)))
@@ -193,8 +259,16 @@ def wipe_server(con: sqlite3.Connection, server_id: str, keep_snapshots: bool = 
     """Delete memories, tombstones and owners; snapshot first; bump generation.
     Snapshots are kept as the recovery path (pass keep_snapshots=False to nuke all)."""
     snap_id = take_snapshot(con, server_id)
+    old_memories = con.execute("SELECT key,pos,updated_at,updated_by FROM memories WHERE server_id=?", (server_id,)).fetchall()
+    old_tombstones = con.execute("SELECT key,pos,deleted_at,deleted_by FROM tombstones WHERE server_id=?", (server_id,)).fetchall()
     mem = con.execute("DELETE FROM memories WHERE server_id=?", (server_id,)).rowcount
     tomb = con.execute("DELETE FROM tombstones WHERE server_id=?", (server_id,)).rowcount
+    for row in old_memories:
+        _append_event(con, server_id, {"key": row["key"], "pos": row["pos"], "deleted": True,
+                                       "updatedAt": row["updated_at"], "updatedBy": row["updated_by"], "items": []})
+    for row in old_tombstones:
+        _append_event(con, server_id, {"key": row["key"], "pos": row["pos"], "deleted": True,
+                                       "updatedAt": row["deleted_at"], "updatedBy": row["deleted_by"], "items": []})
     own = con.execute("DELETE FROM key_owners WHERE server_id=?", (server_id,)).rowcount
     if not keep_snapshots:
         con.execute("DELETE FROM snapshots WHERE server_id=?", (server_id,))
@@ -260,11 +334,28 @@ def in_range(pos: str, dim_key: str, player_dim: str,
 
 def select_pull(con: sqlite3.Connection, server_id: str, player_dim: str | None = None,
                 px: int | None = None, py: int | None = None, pz: int | None = None,
-                radius: int = 5000) -> tuple[list[dict], list[dict]]:
+                radius: int = 5000, since: int | None = None) -> tuple[list[dict], list[dict]]:
     """Gated pull: without a player position this is the legacy full pull (compat);
     with one, only same-dimension in-range entries plus ender keys are returned —
     including tombstones (positions leak too)."""
     gated = player_dim is not None and px is not None and py is not None and pz is not None
+    if since is not None:
+        changes: list[dict] = []
+        tombs: list[dict] = []
+        for row in con.execute(
+                "SELECT payload FROM change_events WHERE server_id=? AND revision>? ORDER BY revision",
+                (server_id, since)):
+            payload = json.loads(row["payload"])
+            if gated and not in_range(payload.get("pos", ""), payload.get("key", ""),
+                                      player_dim, px, py, pz, radius):
+                continue
+            if payload.get("deleted"):
+                tombs.append({"key": payload["key"], "pos": payload["pos"],
+                              "deleted_at": payload.get("updatedAt"),
+                              "deleted_by": payload.get("updatedBy")})
+            else:
+                changes.append(payload)
+        return changes, tombs
     changes: list[dict] = []
     for key, positions in full_state(con, server_id).items():
         for pos, mem in positions.items():
@@ -276,6 +367,35 @@ def select_pull(con: sqlite3.Connection, server_id: str, player_dim: str | None 
         if gated and not in_range(r["pos"], r["key"], player_dim, px, py, pz, radius):
             continue
         tombs.append(dict(r))
+    return changes, tombs
+
+def select_pull_for_client(con: sqlite3.Connection, server_id: str, client_id: str,
+                           player_dim: str | None, px: int | None, py: int | None,
+                           pz: int | None, radius: int, since: int | None) -> tuple[list[dict], list[dict]]:
+    """Use a durable per-client range cursor so moving into a new range cannot
+    skip older events. A changed position/dimension receives the current relevant
+    state; a stationary client receives only events after its revision."""
+    gated = player_dim is not None and px is not None and py is not None and pz is not None
+    if not gated:
+        return select_pull(con, server_id, player_dim, px, py, pz, radius, since)
+    session = con.execute(
+        "SELECT dim,px,py,pz,revision FROM pull_sessions WHERE server_id=? AND client_id=?",
+        (server_id, client_id),
+    ).fetchone()
+    moved = session is None or (session["dim"], session["px"], session["py"], session["pz"]) != \
+        (player_dim, px, py, pz)
+    stale_cursor = session is not None and (since is None or since < int(session["revision"]))
+    effective_since = None if moved or stale_cursor else since
+    changes, tombs = select_pull(con, server_id, player_dim, px, py, pz, radius, effective_since)
+    con.execute(
+        """INSERT INTO pull_sessions(server_id,client_id,dim,px,py,pz,revision)
+           VALUES(?,?,?,?,?,?,?)
+           ON CONFLICT(server_id,client_id) DO UPDATE SET
+             dim=excluded.dim,px=excluded.px,py=excluded.py,pz=excluded.pz,
+             revision=excluded.revision,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')""",
+        (server_id, client_id, player_dim, px, py, pz, get_revision(con, server_id)),
+    )
+    con.commit()
     return changes, tombs
 
 def mass_delete_detected(existing: int, delete_count: int,

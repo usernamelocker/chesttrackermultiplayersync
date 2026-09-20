@@ -61,6 +61,42 @@ def test_memory_and_tombstone_share_lww():
     con.close()
     print("memory+tombstone lww ok")
 
+
+def test_incremental_change_log():
+    p = _tmpdb()
+    con = db.connect(p)
+    s = "multiplayer/revisions"
+    db.apply_changes(con, s, [_chg("minecraft:overworld", "0,64,0", 10)])
+    db.apply_changes(con, s, [_chg("minecraft:overworld", "1,64,0", 11)])
+    db.apply_changes(con, s, [_chg("minecraft:overworld", "0,64,0", 12, deleted=True)])
+    assert db.get_revision(con, s) == 3
+    changes, tombs = db.select_pull(con, s, since=1)
+    assert {c["pos"] for c in changes} == {"1,64,0"}
+    assert {t["pos"] for t in tombs} == {"0,64,0"}
+    # A cursor at the newest revision is a true no-op.
+    assert db.select_pull(con, s, since=3) == ([], [])
+    con.close()
+    print("incremental change log ok")
+
+
+def test_range_cursor_does_not_skip_on_move():
+    p = _tmpdb()
+    con = db.connect(p)
+    s = "multiplayer/range-cursor"
+    db.apply_changes(con, s, [_chg("minecraft:overworld", "0,64,0", 10),
+                               _chg("minecraft:overworld", "9000,64,0", 11)])
+    changes, _ = db.select_pull_for_client(con, s, "player", "minecraft:overworld",
+                                           0, 64, 0, 5000, None)
+    assert {c["pos"] for c in changes} == {"0,64,0"}
+    revision = db.get_revision(con, s)
+    assert db.select_pull_for_client(con, s, "player", "minecraft:overworld",
+                                     0, 64, 0, 5000, revision) == ([], [])
+    changes, _ = db.select_pull_for_client(con, s, "player", "minecraft:overworld",
+                                           9000, 64, 0, 5000, revision)
+    assert {c["pos"] for c in changes} == {"9000,64,0"}
+    con.close()
+    print("range cursor move ok")
+
 def test_mass_delete_guard():
     assert db.mass_delete_detected(100, 25) is True
     assert db.mass_delete_detected(100, 5) is False
@@ -140,6 +176,8 @@ def test_canonical_case():
 if __name__ == "__main__":
     test_lww()
     test_memory_and_tombstone_share_lww()
+    test_incremental_change_log()
+    test_range_cursor_does_not_skip_on_move()
     test_mass_delete_guard()
     test_range_gate()
     test_snapshot_restore()

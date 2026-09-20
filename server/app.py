@@ -148,7 +148,8 @@ def push(req: PushRequest, x_cmsync_token: str | None = Header(default=None, ali
         # v1-compat: full-snapshot posts arrive as PushRequest with many upserts; LWW handles them.
         res = db.apply_changes(con, sid, changes)
         _maybe_snapshot(con, sid)
-        res.update({"status": "SYNCED", "containers": db.container_count(con, sid)})
+        res.update({"status": "SYNCED", "containers": db.container_count(con, sid),
+                    "revision": db.get_revision(con, sid)})
         return res
 
 def _maybe_snapshot(con, server_id: str) -> None:
@@ -160,7 +161,7 @@ def _maybe_snapshot(con, server_id: str) -> None:
         _last_snapshot[server_id] = now
 
 @app.get("/api/pull")
-def pull(serverId: str = Query(...), since: str | None = Query(default=None),
+def pull(serverId: str = Query(...), since: int | None = Query(default=None, ge=0),
          playerUuid: str = Query(...),
          px: int | None = Query(default=None), py: int | None = Query(default=None),
          pz: int | None = Query(default=None), dim: str | None = Query(default=None),
@@ -175,11 +176,14 @@ def pull(serverId: str = Query(...), since: str | None = Query(default=None),
         _log.info("pull DENIED %s player=%s", denied.get("reason"), playerUuid)
         return denied
     with _con() as con:
-        changes, tombs = db.select_pull(con, sid, dim, px, py, pz, config.RANGE_BLOCKS)
+        changes, tombs = db.select_pull_for_client(
+            con, sid, playerUuid, dim, px, py, pz, config.RANGE_BLOCKS, since
+        )
         owners = db.get_owners(con, sid)
-        return {"status": "SYNCED", "serverTime": time.time(), "cursor": since or "",
+        return {"status": "SYNCED", "serverTime": time.time(), "cursor": db.get_revision(con, sid),
                 "changes": changes, "tombstones": tombs, "owners": owners,
                 "generation": db.get_generation(con, sid),
+                "revision": db.get_revision(con, sid),
                 "containers": db.container_count(con, sid)}
 
 @app.get("/api/pullWebPage")

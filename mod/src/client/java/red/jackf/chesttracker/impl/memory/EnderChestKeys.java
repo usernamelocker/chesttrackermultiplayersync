@@ -120,6 +120,7 @@ public final class EnderChestKeys {
             if (override != null) toKey.overrides().put(entry.getKey(), override);
             moved++;
         }
+        if (moved > 0) bank.markMutated();
         if (!fromKey.get().getMemories().isEmpty()) {
             // anything left (collisions) stays; only drop the key when fully moved
             if (moved > 0) ChestTracker.LOGGER.info("Migrated {} ender chest entries {} -> {}", moved, from, to);

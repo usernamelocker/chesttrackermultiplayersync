@@ -91,14 +91,21 @@ incremental cursor — `since` is accepted but unused, kept for compat):
 {
   "status": "SYNCED",
   "serverTime": 1758...,
-  "cursor": "",
+  "cursor": 42,
   "changes": [ "...same shape as push..." ],
   "tombstones": [{"key": "...", "pos": "...", "deleted_at": "..."}],
   "owners": {"<uuid>": "<playerName>"},
   "generation": 3,
-  "containers": 1234
+  "containers": 1234,
+  "revision": 42
 }
 ```
+
+`revision`/`cursor` is the newest durable server revision included in the
+response. A client sends that number back as `since` on its next pull. With a
+position-gated pull, a durable per-client range cursor makes a stationary pull
+incremental while a move to a new position or dimension returns the current
+relevant state before incremental pulls resume.
 
 * **Range gate:** with player position (`px,py,pz` + dimension `dim`), only same-dimension
   containers within `RANGE_BLOCKS` (default 5000) are returned — plus ender-style keys,
