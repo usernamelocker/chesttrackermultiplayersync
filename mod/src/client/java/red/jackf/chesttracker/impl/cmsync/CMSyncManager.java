@@ -654,8 +654,7 @@ private void doPullBlocking(Minecraft client, String bankId, String url, String 
                 // full NBT restore on same MC version, else names+counts fallback
                 Memory mem = null;
                 String rawMc = raw != null ? ItemNormalizer.optStr(raw, "mc") : null;
-                if (raw != null && raw.has("memory") && raw.get("memory").isJsonObject()
-                        && myMc.equals(rawMc)) {
+                if (raw != null && raw.has("memory") && raw.get("memory").isJsonObject()) {
                     try {
                         Memory parsed = Memory.CODEC.parse(ops, raw.get("memory")).result().orElse(null);
                         if (parsed != null) mem = stripEntities(parsed);
