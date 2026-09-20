@@ -71,7 +71,7 @@ client's clears locals (wipe propagation).
 ```
 
 * One entry per container `(key,pos)`. `deleted=true` creates a tombstone.
-* `generation` is the server wipe generation learned during handshake/pull. The
+* `generation` is required and is the server wipe generation learned during handshake/pull. The
   server rejects a push prepared against an older generation, preventing an
   in-flight or offline stale snapshot from resurrecting wiped data. Clients
   should pull and apply the returned generation before retrying.

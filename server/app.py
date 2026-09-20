@@ -130,7 +130,7 @@ def push(req: PushRequest, x_cmsync_token: str | None = Header(default=None, ali
         existing = db.container_count(con, sid)
         deletes = sum(1 for c in changes if c.get("deleted"))
         current_generation = db.get_generation(con, sid)
-        if req.generation is not None and req.generation != current_generation:
+        if req.generation != current_generation:
             _log.warning("STALE GENERATION %s: client=%s server=%s player=%s",
                          sid, req.generation, current_generation, req.playerUuid)
             return JSONResponse(status_code=409, content={
