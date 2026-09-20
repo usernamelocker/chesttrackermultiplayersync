@@ -227,11 +227,12 @@ def snapshots(serverId: str):
 
 @app.post("/api/restore")
 def restore(body: dict, x_cmsync_token: str | None = Header(default=None, alias="X-CMSync-Token")):
-    if config.ADMIN_TOKEN and x_cmsync_token != config.ADMIN_TOKEN:
+    if not config.ADMIN_TOKEN or x_cmsync_token != config.ADMIN_TOKEN:
         raise HTTPException(401, "admin only")
     with _con() as con:
-        n = db.restore_snapshot(con, config.canonical_server_id(body["serverId"]), int(body["snapshotId"]))
-        return {"status": "SYNCED", "restored": n}
+        sid = config.canonical_server_id(body["serverId"])
+        n = db.restore_snapshot(con, sid, int(body["snapshotId"]))
+        return {"status": "SYNCED", "restored": n, "generation": db.get_generation(con, sid)}
 
 
 # Two-step wipe: POST {confirm:false} -> challenge, then POST {confirm:true, challenge}.

@@ -76,32 +76,63 @@ def full_state(con: sqlite3.Connection, server_id: str) -> dict:
         }
     return out
 
+def _logical_version(con: sqlite3.Connection, server_id: str, key: str, pos: str) -> str | None:
+    """Return the authoritative version for one logical container.
+
+    Memories and tombstones are stored separately for compatibility with the
+    existing schema, but they represent one LWW stream.  A row in either table
+    therefore participates in the same comparison.
+    """
+    row = con.execute(
+        """SELECT MAX(version) AS version FROM (
+               SELECT updated_at AS version FROM memories
+                WHERE server_id=? AND key=? AND pos=?
+               UNION ALL
+               SELECT deleted_at AS version FROM tombstones
+                WHERE server_id=? AND key=? AND pos=?
+           )""",
+        (server_id, key, pos, server_id, key, pos),
+    ).fetchone()
+    return row["version"] if row and row["version"] is not None else None
+
 def apply_changes(con: sqlite3.Connection, server_id: str, changes: list[dict]) -> dict:
     """LWW per (key,pos). Returns {applied, skipped_stale}."""
     applied = skipped = 0
     for c in changes:
         key, pos = c["key"], c["pos"]
+        current_version = _logical_version(con, server_id, key, pos)
+        if current_version is not None and current_version >= c["updatedAt"]:
+            skipped += 1
+            continue
+
         if c.get("deleted"):
-            # delete wins only if newer than existing memory
-            cur = con.execute("SELECT updated_at FROM memories WHERE server_id=? AND key=? AND pos=?",
-                              (server_id, key, pos)).fetchone()
-            if cur and cur["updated_at"] >= c["updatedAt"]:
-                skipped += 1
-                continue
             con.execute("DELETE FROM memories WHERE server_id=? AND key=? AND pos=?", (server_id, key, pos))
             con.execute("INSERT OR REPLACE INTO tombstones(server_id,key,pos,deleted_at,deleted_by) VALUES(?,?,?,?,?)",
                         (server_id, key, pos, c["updatedAt"], c.get("updatedBy")))
-            # clear tombstone if it was a re-add (deleted=false handled below removes tombstone)
-            applied += 1
         else:
-            cur = con.execute("SELECT updated_at FROM memories WHERE server_id=? AND key=? AND pos=?",
-                              (server_id, key, pos)).fetchone()
-            if cur and cur["updated_at"] >= c["updatedAt"]:
-                skipped += 1
-                continue
-
             con.execute("DELETE FROM tombstones WHERE server_id=? AND key=? AND pos=?", (server_id, key, pos))
-            applied += 1
+            con.execute(
+                """INSERT INTO memories(
+                       server_id,key,pos,items_norm,raw,mc_version,updated_by,updated_at
+                   ) VALUES(?,?,?,?,?,?,?,?)
+                   ON CONFLICT(server_id,key,pos) DO UPDATE SET
+                       items_norm=excluded.items_norm,
+                       raw=excluded.raw,
+                       mc_version=excluded.mc_version,
+                       updated_by=excluded.updated_by,
+                       updated_at=excluded.updated_at""",
+                (
+                    server_id,
+                    key,
+                    pos,
+                    json.dumps(c.get("items", [])),
+                    json.dumps(c["raw"]) if c.get("raw") is not None else None,
+                    c.get("mcVersion"),
+                    c.get("updatedBy"),
+                    c["updatedAt"],
+                ),
+            )
+        applied += 1
     con.commit()
     return {"applied": applied, "skipped_stale": skipped}
 
@@ -136,6 +167,8 @@ def restore_snapshot(con: sqlite3.Connection, server_id: str, snapshot_id: int) 
                          json.dumps(mem["raw"]) if mem.get("raw") is not None else None,
                          mem.get("mcVersion"), mem.get("updatedBy"), mem.get("updatedAt", "1970-01-01T00:00:00Z")))
             n += 1
+    con.execute("INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)",
+                (f"gen:{server_id}", str(get_generation(con, server_id) + 1)))
     con.commit()
     return n
 

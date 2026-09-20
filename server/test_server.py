@@ -37,6 +37,30 @@ def test_lww():
     con.close()
     print("lww ok")
 
+
+def test_memory_and_tombstone_share_lww():
+    p = _tmpdb()
+    con = db.connect(p)
+    s = "multiplayer/test"
+
+    assert db.apply_changes(con, s, [_chg("k", "0,0,0", 10)]) == {"applied": 1, "skipped_stale": 0}
+    assert db.apply_changes(con, s, [_chg("k", "0,0,0", 20, deleted=True)]) == {"applied": 1, "skipped_stale": 0}
+
+    # A newer tombstone blocks an older upsert and an older delete cannot replace it.
+    assert db.apply_changes(con, s, [_chg("k", "0,0,0", 15)]) == {"applied": 0, "skipped_stale": 1}
+    assert db.apply_changes(con, s, [_chg("k", "0,0,0", 19, deleted=True)]) == {"applied": 0, "skipped_stale": 1}
+    assert db.container_count(con, s) == 0
+    assert con.execute("SELECT deleted_at FROM tombstones WHERE server_id=? AND key=? AND pos=?",
+                       (s, "k", "0,0,0")).fetchone()["deleted_at"] == "2026-09-15T20:00:00Z"
+
+    # A genuinely newer observation re-adds the container and clears the tombstone.
+    assert db.apply_changes(con, s, [_chg("k", "0,0,0", 21)]) == {"applied": 1, "skipped_stale": 0}
+    assert db.container_count(con, s) == 1
+    assert con.execute("SELECT 1 FROM tombstones WHERE server_id=? AND key=? AND pos=?",
+                       (s, "k", "0,0,0")).fetchone() is None
+    con.close()
+    print("memory+tombstone lww ok")
+
 def test_mass_delete_guard():
     assert db.mass_delete_detected(100, 25) is True
     assert db.mass_delete_detected(100, 5) is False
@@ -93,6 +117,7 @@ def test_snapshot_restore():
     assert db.container_count(con, s) == 0
     n = db.restore_snapshot(con, s, sid)
     assert n == 1 and db.container_count(con, s) == 1
+    assert db.get_generation(con, s) == 1
     con.close()
     print("snapshot ok")
 
@@ -114,6 +139,7 @@ def test_canonical_case():
 
 if __name__ == "__main__":
     test_lww()
+    test_memory_and_tombstone_share_lww()
     test_mass_delete_guard()
     test_range_gate()
     test_snapshot_restore()
