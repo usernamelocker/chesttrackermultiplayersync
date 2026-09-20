@@ -106,6 +106,10 @@ public class MemoryKeyImpl implements MemoryKey {
     }
 
     public void add(BlockPos position, Memory memory) {
+        add(position, memory, true);
+    }
+
+    public void add(BlockPos position, Memory memory, boolean updateTimestamp) {
         // if blocked remove instead
         OverrideInfo override = this.overrides.get(position);
         ManualMode manualMode = override != null ? override.getManualMode() : ManualMode.DEFAULT;
@@ -146,7 +150,9 @@ public class MemoryKeyImpl implements MemoryKey {
         }
 
         // TODO add context for gametime
-        memory.touch(this.memoryBank.getMetadata().getLoadedTime(), Minecraft.getInstance().level.getGameTime());
+        if (updateTimestamp) {
+            memory.touch(this.memoryBank.getMetadata().getLoadedTime(), Minecraft.getInstance().level.getGameTime());
+        }
 
         // Shuffle along an override from an existing position thats now connected to the original
         OverrideInfo existingOverride = null;

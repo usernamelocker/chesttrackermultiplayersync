@@ -155,9 +155,18 @@ public class MemoryBankImpl implements MemoryBank {
 
     @Override
     public void addMemory(Identifier keyId, BlockPos location, Memory memory) {
+        addMemory(keyId, location, memory, true);
+    }
+
+    /** Add a server-merged memory without replacing its observation timestamp. */
+    public void addMemoryPreservingTimestamp(Identifier keyId, BlockPos location, Memory memory) {
+        addMemory(keyId, location, memory, false);
+    }
+
+    private void addMemory(Identifier keyId, BlockPos location, Memory memory, boolean updateTimestamp) {
         MemoryKeyImpl key = this.getOrCreateKeyInternal(keyId);
 
-        key.add(location, memory);
+        key.add(location, memory, updateTimestamp);
 
         // if we didn't want the memory
         if (key.isEmpty()) {
