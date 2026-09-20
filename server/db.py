@@ -57,6 +57,14 @@ CREATE TABLE IF NOT EXISTS pull_sessions(
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   PRIMARY KEY(server_id, client_id)
 );
+CREATE TABLE IF NOT EXISTS wipe_challenges(
+  server_id TEXT PRIMARY KEY,
+  challenge TEXT NOT NULL,
+  expires_at REAL NOT NULL,
+  state TEXT NOT NULL DEFAULT 'pending',
+  result TEXT,
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
 CREATE TABLE IF NOT EXISTS key_owners(
   server_id TEXT NOT NULL,
   key TEXT NOT NULL,
@@ -253,6 +261,68 @@ def get_generation(con: sqlite3.Connection, server_id: str) -> int:
         return int(row["v"]) if row else 0
     except (ValueError, TypeError):
         return 0
+
+
+def start_wipe_challenge(con: sqlite3.Connection, server_id: str,
+                         challenge: str, expires_at: float) -> dict:
+    """Create a shared challenge, safe across multiple Uvicorn workers.
+
+    A pending/running challenge is reused instead of replaced so a retry from a
+    different worker cannot invalidate the confirmation currently in flight.
+    """
+    now = time.time()
+    con.execute("BEGIN IMMEDIATE")
+    row = con.execute(
+        "SELECT challenge,expires_at,state,result FROM wipe_challenges WHERE server_id=?",
+        (server_id,),
+    ).fetchone()
+    if row and float(row["expires_at"]) > now and row["state"] in ("pending", "running"):
+        con.commit()
+        return dict(row)
+    con.execute(
+        "INSERT INTO wipe_challenges(server_id,challenge,expires_at,state,result) VALUES(?,?,?,?,NULL) "
+        "ON CONFLICT(server_id) DO UPDATE SET challenge=excluded.challenge,expires_at=excluded.expires_at,"
+        "state='pending',result=NULL,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')",
+        (server_id, challenge, expires_at, "pending"),
+    )
+    con.commit()
+    return {"challenge": challenge, "expires_at": expires_at, "state": "pending", "result": None}
+
+
+def claim_wipe_challenge(con: sqlite3.Connection, server_id: str,
+                         challenge: str) -> dict | None:
+    """Claim one confirmation, or return its durable running/completed state."""
+    con.execute("BEGIN IMMEDIATE")
+    row = con.execute(
+        "SELECT challenge,expires_at,state,result FROM wipe_challenges WHERE server_id=?",
+        (server_id,),
+    ).fetchone()
+    if not row or row["challenge"] != challenge or float(row["expires_at"]) <= time.time():
+        con.commit()
+        return None
+    if row["state"] == "completed":
+        con.commit()
+        return dict(row)
+    if row["state"] == "running":
+        con.commit()
+        return dict(row)
+    con.execute(
+        "UPDATE wipe_challenges SET state='running',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+        "WHERE server_id=? AND challenge=?",
+        (server_id, challenge),
+    )
+    con.commit()
+    return {"challenge": challenge, "expires_at": row["expires_at"], "state": "claimed", "result": None}
+
+
+def complete_wipe_challenge(con: sqlite3.Connection, server_id: str,
+                            challenge: str, result: dict) -> None:
+    con.execute(
+        "UPDATE wipe_challenges SET state='completed',result=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+        "WHERE server_id=? AND challenge=?",
+        (json.dumps(result), server_id, challenge),
+    )
+    con.commit()
 
 
 def wipe_server(con: sqlite3.Connection, server_id: str, keep_snapshots: bool = True) -> dict:

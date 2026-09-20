@@ -26,9 +26,12 @@ BOB = "22222222-2222-2222-2222-222222222222"
 SID = "multiplayer/mc_test"
 
 
-def ident(uuid, mc="1.21.11", sid=SID):
-    return {"protocolVersion": 2, "playerUuid": uuid, "playerName": "T",
-            "serverId": sid, "serverName": "T", "mcVersion": mc, "modVersion": "cmsync.1"}
+def ident(uuid, mc="1.21.11", sid=SID, generation=None):
+    result = {"protocolVersion": 2, "playerUuid": uuid, "playerName": "T",
+              "serverId": sid, "serverName": "T", "mcVersion": mc, "modVersion": "cmsync.1"}
+    if generation is not None:
+        result["generation"] = generation
+    return result
 
 
 def change(key, pos, hour, items, uuid=ALICE, mc="1.21.11", deleted=False):
@@ -58,7 +61,7 @@ print("422 shape ok (validation detail preserved for logs)")
 
 iron = [{"id": "minecraft:iron_ingot", "count": 5}]
 diamond = [{"id": "minecraft:diamond", "count": 2}]
-body = dict(ident(ALICE), fullHash="h1", changes=[
+body = dict(ident(ALICE, generation=0), fullHash="h1", changes=[
     change("minecraft:overworld", "1,2,3", 10, iron),
     dict(change("minecraft:overworld", "4,5,6", 10, diamond, mc="26.2"),
          raw={"v": 2, "mc": "26.2",
@@ -111,6 +114,16 @@ r = c.post("/api/restore", json={"serverId": SID, "snapshotId": first_id},
 assert r["status"] == "SYNCED" and r["restored"] == 2 and r["generation"] == 1, r
 assert c.get(f"/api/view/{SID}").json()["containers"] == 2
 print("restore ok")
+
+# A client that prepared a push before restore/wipe cannot resurrect its state
+# after the server generation changes.
+stale = dict(ident(ALICE, generation=0), fullHash="stale", changes=[
+    change("minecraft:overworld", "88,88,88", 18, iron),
+])
+r = c.post("/api/push", json=stale)
+assert r.status_code == 409 and r.json()["status"] == "STALE_GENERATION", r.text
+assert not any(x["pos"] == "88,88,88" for x in c.get("/api/pull", params={"serverId": SID, "playerUuid": BOB}).json()["changes"])
+print("stale generation push guard ok")
 
 # --- token mode: whitelist empty, password required instead of UUIDs ---
 config.WHITELIST_UUIDS = set()

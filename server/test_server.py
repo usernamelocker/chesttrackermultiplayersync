@@ -157,6 +157,26 @@ def test_snapshot_restore():
     con.close()
     print("snapshot ok")
 
+
+def test_wipe_challenge_is_shared_and_idempotent():
+    p = _tmpdb()
+    con1 = db.connect(p)
+    con2 = db.connect(p)
+    s = "multiplayer/wipe-workers"
+    first = db.start_wipe_challenge(con1, s, "worker-a", 9999999999)
+    # A second worker must reuse the durable challenge, not replace it.
+    second = db.start_wipe_challenge(con2, s, "worker-b", 9999999999)
+    assert second["challenge"] == "worker-a"
+    assert db.claim_wipe_challenge(con2, s, "worker-a")["state"] == "claimed"
+    assert db.claim_wipe_challenge(con1, s, "worker-a")["state"] == "running"
+    db.complete_wipe_challenge(con2, s, "worker-a", {"generation": 4, "memories": 0})
+    completed = db.claim_wipe_challenge(con1, s, "worker-a")
+    assert completed["state"] == "completed"
+    assert '"generation": 4' in completed["result"]
+    con1.close()
+    con2.close()
+    print("durable wipe challenge ok")
+
 def test_canonical_case():
     import config
     old_exp, old_alias = config.EXPECTED_SERVER_ID, config.SERVER_ID_ALIASES
@@ -181,5 +201,6 @@ if __name__ == "__main__":
     test_mass_delete_guard()
     test_range_gate()
     test_snapshot_restore()
+    test_wipe_challenge_is_shared_and_idempotent()
     test_canonical_case()
     print("ALL SERVER TESTS PASSED")
