@@ -100,14 +100,15 @@ print("mass delete ok")
 snaps = c.get("/api/snapshots", params={"serverId": SID}).json()["snapshots"]
 assert len(snaps) >= 2, snaps
 first_id = snaps[-1]["id"]  # oldest = the 2-container snapshot
-r = c.post("/api/restore", json={"serverId": SID, "snapshotId": first_id}).json()
-assert r["status"] == "SYNCED" and r["restored"] == 2, r
+import config  # noqa: E402
+config.ADMIN_TOKEN = "restore-secret"
+r = c.post("/api/restore", json={"serverId": SID, "snapshotId": first_id},
+           headers={"X-CMSync-Token": "restore-secret"}).json()
+assert r["status"] == "SYNCED" and r["restored"] == 2 and r["generation"] == 1, r
 assert c.get(f"/api/view/{SID}").json()["containers"] == 2
 print("restore ok")
 
 # --- token mode: whitelist empty, password required instead of UUIDs ---
-import config  # noqa: E402
-
 config.WHITELIST_UUIDS = set()
 config.SHARED_TOKEN = "test-secret"
 config.ADMIN_TOKEN = "test-secret"
