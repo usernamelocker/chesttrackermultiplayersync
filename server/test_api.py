@@ -212,7 +212,7 @@ assert r["status"] == "SYNCED", r
 got = {(x["key"], x["pos"]) for x in r["changes"]}
 assert ("minecraft:overworld", "100,64,100") in got, got
 assert not any(p == "9000,64,9000" for _, p in got), got
-assert not any(k == "minecraft:the_nether" for k, _ in got), got
+assert ("minecraft:the_nether", "100,64,100") in got, got
 assert (f"chesttracker:ender_chest/{EUUID}", "0,0,0") in got, got
 assert r["owners"].get(EUUID) == "T", r["owners"]
 r = c.get("/api/pull", params={"serverId": CANON, "playerUuid": STRANGER}, headers=TOK).json()

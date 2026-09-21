@@ -118,7 +118,7 @@ def _chg(key, pos, hour, deleted=False):
 def test_range_gate():
     assert db.in_range("100,64,100", "minecraft:overworld", "minecraft:overworld", 0, 64, 0, 5000) is True
     assert db.in_range("9000,64,0", "minecraft:overworld", "minecraft:overworld", 0, 64, 0, 5000) is False
-    assert db.in_range("100,64,100", "minecraft:the_nether", "minecraft:overworld", 0, 64, 0, 5000) is False
+    assert db.in_range("100,64,100", "minecraft:the_nether", "minecraft:overworld", 0, 64, 0, 5000) is True
     assert db.in_range("99999,64,99999", "chesttracker:ender_chest/aaa", "minecraft:overworld", 0, 64, 0, 5000) is True
     assert db.in_range("bogus", "minecraft:overworld", "minecraft:overworld", 0, 64, 0, 5000) is False
     p = _tmpdb()
@@ -147,7 +147,15 @@ def test_nether_range_gate_uses_overworld_equivalent_distance():
                        0, 64, 0, 5000) is True
     assert db.in_range("626,64,0", "minecraft:the_nether", "minecraft:the_nether",
                        0, 64, 0, 5000) is False
-    assert db.in_range("100,64,0", "minecraft:the_nether", "minecraft:overworld",
+    assert db.in_range("625,64,0", "minecraft:the_nether", "minecraft:overworld",
+                       0, 64, 0, 5000) is True
+    assert db.in_range("626,64,0", "minecraft:the_nether", "minecraft:overworld",
+                       0, 64, 0, 5000) is False
+    assert db.in_range("5000,64,0", "minecraft:overworld", "minecraft:the_nether",
+                       0, 64, 0, 5000) is True
+    assert db.in_range("5001,64,0", "minecraft:overworld", "minecraft:the_nether",
+                       0, 64, 0, 5000) is False
+    assert db.in_range("100,64,0", "minecraft:the_end", "minecraft:overworld",
                        0, 64, 0, 5000) is False
     print("nether range gate ok")
 
