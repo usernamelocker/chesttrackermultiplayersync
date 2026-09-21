@@ -37,8 +37,9 @@
 3. Server: `serverId` (case-insensitive) + token check → hub-wipe guard (empty push
    vs non-empty store ignored) → mass-delete snapshot + warning → `apply_changes`
    LWW → periodic snapshot.
-4. Client `GET /api/pull` (range-gated: same dimension + 5000 blocks, ender keys
-   exempt) → same-version full-NBT restore, else names+counts fallback **stamped
+4. Client `GET /api/pull` (range-gated: same dimension + 5000 Overworld-equivalent
+   blocks; Nether horizontal coordinates use the 1:8 scale, ender keys exempt)
+   → same-version full-NBT restore, else names+counts fallback **stamped
    with the observation time** (never `now` — see normalization.md) → merge on
    client thread → search/render picks it up.
 5. Website: `GET /api/view/{serverId}` aggregates normalized totals.

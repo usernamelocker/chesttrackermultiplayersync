@@ -141,6 +141,16 @@ def test_range_gate():
     con.close()
     print("range+owners ok")
 
+
+def test_nether_range_gate_uses_overworld_equivalent_distance():
+    assert db.in_range("625,64,0", "minecraft:the_nether", "minecraft:the_nether",
+                       0, 64, 0, 5000) is True
+    assert db.in_range("626,64,0", "minecraft:the_nether", "minecraft:the_nether",
+                       0, 64, 0, 5000) is False
+    assert db.in_range("100,64,0", "minecraft:the_nether", "minecraft:overworld",
+                       0, 64, 0, 5000) is False
+    print("nether range gate ok")
+
 def test_snapshot_restore():
     p = _tmpdb()
     con = db.connect(p)
@@ -200,6 +210,7 @@ if __name__ == "__main__":
     test_range_cursor_does_not_skip_on_move()
     test_mass_delete_guard()
     test_range_gate()
+    test_nether_range_gate_uses_overworld_equivalent_distance()
     test_snapshot_restore()
     test_wipe_challenge_is_shared_and_idempotent()
     test_canonical_case()

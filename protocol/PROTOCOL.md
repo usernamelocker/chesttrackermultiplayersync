@@ -113,9 +113,12 @@ incremental while a move to a new position or dimension returns the current
 relevant state before incremental pulls resume.
 
 * **Range gate:** with player position (`px,py,pz` + dimension `dim`), only same-dimension
-  containers within `RANGE_BLOCKS` (default 5000) are returned — plus ender-style keys,
-  which have no position and always pass. Tombstones are gated the same way (positions
-  leak too). Without position params the pull is ungated (old-client compatible).
+  containers within `RANGE_BLOCKS` (default 5000 Overworld-equivalent blocks) are returned
+  — plus ender-style keys, which have no position and always pass. In
+  `minecraft:the_nether`, horizontal coordinate differences are multiplied by 8, so the
+  default effective radius is 625 Nether blocks; Y is unchanged. Tombstones are gated the
+  same way (positions leak too). Without position params the pull is ungated (old-client
+  compatible).
 * `owners` maps ender-chest key owners to last-seen names (powers profile labels).
 * Ender chests sync under per-player keys (`chesttracker:ender_chest/<uuid>` etc.),
   so teammates' ender chests never merge — the server treats keys opaquely.

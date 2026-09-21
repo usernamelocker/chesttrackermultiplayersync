@@ -389,8 +389,15 @@ def _parse_pos(pos: str) -> tuple[int, int, int] | None:
 
 def in_range(pos: str, dim_key: str, player_dim: str,
              px: int, py: int, pz: int, radius: int) -> bool:
-    """Range gate: same dimension + within radius blocks (3D). Ender-style keys
-    (no meaningful position) always pass; unknown/unparseable positions fail closed."""
+    """Range gate in Overworld-equivalent blocks (3D).
+
+    World data remains dimension-scoped: Nether records are only compared with
+    a player in the Nether.  Inside the Nether, horizontal coordinates are
+    multiplied by eight so the default 5,000-block security radius represents
+    the same Overworld-equivalent area (625 Nether blocks).  Y is not scaled.
+    Ender-style keys (no meaningful position) always pass; unknown/unparseable
+    positions fail closed.
+    """
     if is_ender_key(dim_key):
         return True
     if dim_key != player_dim:
@@ -399,15 +406,18 @@ def in_range(pos: str, dim_key: str, player_dim: str,
     if parsed is None:
         return False
     x, y, z = parsed
-    return (x - px) ** 2 + (y - py) ** 2 + (z - pz) ** 2 <= radius * radius
+    horizontal_scale = 8 if player_dim == "minecraft:the_nether" else 1
+    dx = (x - px) * horizontal_scale
+    dz = (z - pz) * horizontal_scale
+    return dx ** 2 + (y - py) ** 2 + dz ** 2 <= radius * radius
 
 
 def select_pull(con: sqlite3.Connection, server_id: str, player_dim: str | None = None,
                 px: int | None = None, py: int | None = None, pz: int | None = None,
                 radius: int = 5000, since: int | None = None) -> tuple[list[dict], list[dict]]:
     """Gated pull: without a player position this is the legacy full pull (compat);
-    with one, only same-dimension in-range entries plus ender keys are returned —
-    including tombstones (positions leak too)."""
+    with one, only same-dimension, Overworld-equivalent in-range entries plus
+    ender keys are returned — including tombstones (positions leak too)."""
     gated = player_dim is not None and px is not None and py is not None and pz is not None
     if since is not None:
         changes: list[dict] = []

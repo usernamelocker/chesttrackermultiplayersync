@@ -34,7 +34,9 @@ delete, leaves nothing behind.
   `/api/restore`; ⚠️ escape `$` as `$$` in compose/Portainer values.
 * Tuning: `DB_PATH`, `SNAPSHOT_INTERVAL_MIN=15`, `SNAPSHOT_KEEP=96`,
   `MAX_DELETE_FRACTION=0.20`, `MAX_DELETE_COUNT=50`, `RANGE_BLOCKS=5000`,
-  `TOMBSTONE_TTL_DAYS=30`.
+  `MAX_UPDATE_FUTURE_SECONDS=300`, `TOMBSTONE_TTL_DAYS=30`. `RANGE_BLOCKS`
+  is Overworld-equivalent; Nether horizontal coordinates use the 1:8 portal
+  scale (so the default is 625 Nether blocks).
 
 ## Endpoints
 
@@ -43,6 +45,7 @@ Full contract: [`../protocol/PROTOCOL.md`](../protocol/PROTOCOL.md).
 * `POST /api/handshake` → `{SYNCED + generation | ACCESS_DENIED + reason}`
 * `POST /api/push` → applies deltas (LWW, ties keep stored) → `{SYNCED + counts}`
 * `GET /api/pull?serverId=&playerUuid=&px=&py=&pz=&dim=` → range-gated changes,
+* `GET /api/snapshots?serverId=` → admin-token-protected snapshot metadata,
   tombstones, ender-chest `owners`, generation
 * `POST /api/wipe` (admin, two-step challenge) → `{WIPED + generation}`
 * `POST /api/restore` (admin), `GET /api/snapshots`, `GET /api/view/{serverId}`

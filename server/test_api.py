@@ -7,6 +7,7 @@ empty-push ignore (hub-wipe), mass-delete quarantine, snapshot restore.
 import os
 import sys
 import tempfile
+from datetime import datetime, timedelta, timezone
 
 _tmp = tempfile.mkdtemp(prefix="cmsync-api-test-")
 os.environ["EXPECTED_SERVER_ID"] = "multiplayer/mc_test"
@@ -19,6 +20,7 @@ os.environ["DB_PATH"] = os.path.join(_tmp, "t.db")
 sys.path.insert(0, os.path.dirname(__file__))
 from fastapi.testclient import TestClient  # noqa: E402
 import app  # noqa: E402
+import config  # noqa: E402
 import db  # noqa: E402
 
 c = TestClient(app.app)
@@ -65,6 +67,20 @@ print("422 shape ok (validation detail preserved for logs)")
 
 iron = [{"id": "minecraft:iron_ingot", "count": 5}]
 diamond = [{"id": "minecraft:diamond", "count": 2}]
+bad_timestamp = dict(ident(ALICE, generation=0), fullHash="bad-time",
+                     changes=[change("minecraft:overworld", "1,2,4", 10, iron)])
+bad_timestamp["changes"][0]["updatedAt"] = "not-a-timestamp"
+r = c.post("/api/push", json=bad_timestamp)
+assert r.status_code == 422, (r.status_code, r.text)
+future_timestamp = dict(ident(ALICE, generation=0), fullHash="future-time",
+                        changes=[change("minecraft:overworld", "1,2,5", 10, iron)])
+future_timestamp["changes"][0]["updatedAt"] = (
+    (datetime.now(timezone.utc) + timedelta(days=1)).isoformat().replace("+00:00", "Z")
+)
+r = c.post("/api/push", json=future_timestamp)
+assert r.status_code == 422, (r.status_code, r.text)
+print("timestamp validation ok")
+
 body = dict(ident(ALICE, generation=0), fullHash="h1", changes=[
     change("minecraft:overworld", "1,2,3", 10, iron),
     dict(change("minecraft:overworld", "4,5,6", 10, diamond, mc="26.2"),
@@ -108,11 +124,12 @@ assert r["status"] == "SYNCED" and r["applied"] == 55, r  # mass deletes apply (
 assert c.get(f"/api/view/{SID}").json()["containers"] == 7, "62 - 55 deletes"
 print("mass delete ok")
 
-snaps = c.get("/api/snapshots", params={"serverId": SID}).json()["snapshots"]
+config.ADMIN_TOKEN = "restore-secret"
+assert c.get("/api/snapshots", params={"serverId": SID}).status_code == 401
+snaps = c.get("/api/snapshots", params={"serverId": SID},
+              headers={"X-CMSync-Token": "restore-secret"}).json()["snapshots"]
 assert len(snaps) >= 2, snaps
 first_id = snaps[-1]["id"]  # oldest = the 2-container snapshot
-import config  # noqa: E402
-config.ADMIN_TOKEN = "restore-secret"
 r = c.post("/api/restore", json={"serverId": SID, "snapshotId": first_id},
            headers={"X-CMSync-Token": "restore-secret"}).json()
 assert r["status"] == "SYNCED" and r["restored"] == 2 and r["generation"] == 1, r
@@ -228,7 +245,7 @@ r = c.post("/api/wipe", json=dict(fident(STRANGER, CANON), confirm=True,
                                   confirm=False), headers=TOK).json()["challenge"]), headers=TOK).json()
 assert r["status"] == "WIPED" and r["generation"] == 1, r
 assert c.get(f"/api/view/{CANON}").json()["containers"] == 0
-assert c.get("/api/snapshots", params={"serverId": CANON}).json()["snapshots"], "snapshots kept"
+assert c.get("/api/snapshots", params={"serverId": CANON}, headers=TOK).json()["snapshots"], "snapshots kept"
 r = c.post("/api/handshake", json=fident(STRANGER, CANON), headers=TOK).json()
 assert r["status"] == "SYNCED" and r["generation"] == 1, r
 r = c.get("/api/pull", params={"serverId": CANON, "playerUuid": STRANGER}, headers=TOK).json()
