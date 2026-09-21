@@ -49,7 +49,12 @@ SNAPSHOT_KEEP = int(os.environ.get("SNAPSHOT_KEEP", "96"))
 MAX_DELETE_FRACTION = float(os.environ.get("MAX_DELETE_FRACTION", "0.20"))
 MAX_DELETE_COUNT = int(os.environ.get("MAX_DELETE_COUNT", "50"))
 MIN_QUARANTINE_BANK = int(os.environ.get("MIN_QUARANTINE_BANK", "10"))
-# Range gate: pull only returns same-dimension containers within this many blocks
-# of the requesting player (+ ender-style keys, which have no position).
+# Range gate: pull only returns same-dimension containers within this many
+# Overworld-equivalent blocks of the requesting player (+ ender-style keys,
+# which have no position). Nether horizontal coordinates use the 1:8 portal
+# scale, so 5000 means 625 Nether blocks by default.
 RANGE_BLOCKS = int(os.environ.get("RANGE_BLOCKS", "5000"))
+# Client observation timestamps may be old because clients can be offline, but
+# a far-future timestamp could permanently win LWW for a container.
+MAX_UPDATE_FUTURE_SECONDS = int(os.environ.get("MAX_UPDATE_FUTURE_SECONDS", "300"))
 TOMBSTONE_TTL_DAYS = int(os.environ.get("TOMBSTONE_TTL_DAYS", "30"))

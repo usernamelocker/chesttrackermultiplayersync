@@ -36,8 +36,18 @@ async def _log_validation_error(request: Request, exc: RequestValidationError):
         raw = (await request.body()).decode("utf-8", "replace")[:2000]
     except Exception:
         raw = "<unreadable>"
-    _log.warning("422 %s %s errors=%s body=%s", request.method, request.url.path, exc.errors(), raw)
-    return JSONResponse(status_code=422, content={"detail": exc.errors()})
+    errors = []
+    for error in exc.errors():
+        safe_error = dict(error)
+        context = safe_error.get("ctx")
+        if isinstance(context, dict):
+            safe_error["ctx"] = {
+                key: str(value) if isinstance(value, BaseException) else value
+                for key, value in context.items()
+            }
+        errors.append(safe_error)
+    _log.warning("422 %s %s errors=%s body=%s", request.method, request.url.path, errors, raw)
+    return JSONResponse(status_code=422, content={"detail": errors})
 
 
 @app.middleware("http")
@@ -236,7 +246,10 @@ def view(server_id: str):
             "totals": totals, "keys": list(state.keys())}
 
 @app.get("/api/snapshots")
-def snapshots(serverId: str):
+def snapshots(serverId: str,
+              x_cmsync_token: str | None = Header(default=None, alias="X-CMSync-Token")):
+    if not config.ADMIN_TOKEN or x_cmsync_token != config.ADMIN_TOKEN:
+        raise HTTPException(401, "admin only")
     with _con() as con:
         return {"snapshots": db.list_snapshots(con, config.canonical_server_id(serverId))}
 
