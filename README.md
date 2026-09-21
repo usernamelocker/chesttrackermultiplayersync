@@ -20,8 +20,9 @@ against the same `serverId`.
   case-insensitive, aliases merge — see [`protocol/PROTOCOL.md`](protocol/PROTOCOL.md)).
 - Merge is **per-container** `(key, pos)`, last-observation-wins on `updatedAt`.
   Broken/emptied containers propagate as **tombstones**; pulls are **range-gated**
-  (same dimension, 5000 Overworld-equivalent blocks; 625 Nether blocks by default)
-  except ender-style keys, which always pass.
+  across nearby Overworld/Nether containers (5000 Overworld-equivalent blocks;
+  625 Nether blocks horizontally by default); other dimensions remain isolated.
+  Ender-style keys always pass.
 - Pushes carry full-fidelity NBT (`raw`) for same-version restores plus a
   names+counts view for search and cross-version fallback. Fallback reconstructions
   keep the observation time, so lossy data can never outrank genuine records
