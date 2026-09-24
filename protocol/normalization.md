@@ -1,4 +1,4 @@
-# Item normalization (cross-version: 1.21.11 / 26.1.2 / 26.2)
+# Item normalization (cross-version: 1.21.11 / 26.1.2)
 
 Vanilla `ItemStack` codec output changes across MC versions (new components, renamed fields).
 Full-bank raw replace breaks across versions. So:

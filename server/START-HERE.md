@@ -41,7 +41,7 @@ You only fill in a small table of settings. Portainer pulls everything from GitH
 
 1. Install the right jar from
    [GitHub Releases](https://github.com/usernamelocker/chesttrackermultiplayersync/releases)
-   (`cmsync-1.21.11-*` or `cmsync-26.1.2-*`) + Fabric API + YACL.
+   (`chesttracker-*-mc1.21.11.jar` or `chesttracker-*-mc26.1.2.jar`) + Fabric API + YACL.
 2. In-game: Memory Bank menu (`` ` `` key → pencil icon) → **Sync** tab →
    paste `http://YOUR-VPS-IP:7000` + the SHARED token → Connect.
    (URL box also accepts `host:port` without scheme and `https://` addresses.)
@@ -51,6 +51,10 @@ You only fill in a small table of settings. Portainer pulls everything from GitH
 4. `/cmsync status` should say `synced` within ~10 seconds.
 
 ## Wipe (fresh start)
+
+The server also protects established banks from accidental delete-only pushes.
+Those pushes return `QUARANTINED` and leave the database unchanged. This guard
+does not block the intentional admin wipe below.
 
 `/cmsync wipealldata` → read the warning → `/cmsync wipealldata confirm` within
 60s. Needs the admin token (CM Settings). Zeroes the server, bumps a generation

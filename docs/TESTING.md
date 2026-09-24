@@ -4,10 +4,11 @@
 
 ```powershell
 cd server
-python -m pytest test_api.py test_server.py   # 5 tests: lww, guard, range+owners, snapshot, canonical-case
+   python -m pytest test_api.py test_server.py
 ```
 
-Covers: LWW newer-wins across `mcVersion`, stale ignored, mass-delete thresholds,
+Covers: LWW newer-wins across `mcVersion`, stale ignored, shared memory/tombstone
+ordering, mass-delete thresholds, exact full-bank quarantine,
 range gate + owner tracking, snapshot → delete → restore, case-insensitive server ids.
 Live smoke against a deployed server (stdlib only, cleans up after itself):
 
@@ -35,10 +36,17 @@ python smoke.py http://VPS-IP:7000 YOURTOKEN
 
 ## Cross-version (1.21.11 + 26.1.2)
 
+Also test a delete-only push covering every stored container: the server must
+return `QUARANTINED`, create a snapshot, and keep the containers. Confirm that
+`/cmsync wipealldata` still succeeds for an intentional admin wipe.
+
 * Same steps with one client per version against the same `serverId`.
-* Expect: counts/search match by `id`; full NBT (enchantments, shulker contents)
-  restores only same-version-to-same-version, names+counts elsewhere.
-* Unknown new-version `id`s must not crash the older client (skipped with warning).
+* Expect: counts/search match by `id`; native data restores when the receiving
+  version can decode it, while the portable envelope supplies known components
+  across versions.
+* Test a nested container/bundle component created on 26.1.2, edit the item on
+  1.21.11, and verify the unknown component survives when it returns to 26.1.2.
+  Unknown newer ids/components must not crash the older client.
 
 ## When something fails
 

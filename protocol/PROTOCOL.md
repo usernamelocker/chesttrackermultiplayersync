@@ -1,10 +1,16 @@
-# CMSync Protocol v2 (extends QMSync v1)
+# CMSync Protocol v2
 
-Base: `QMSync/doc/qmsync-api.md` protocol v1 (`POST /api/handshake`, `POST /api/sync` full snapshot).
-v2 keeps v1 working, adds **delta push / pull merge** so multiple players share one bank in-game
-and across MC versions (`1.21.11`, `26.1.2`, `26.2`).
+CMSync v2 extends the original QMSync handshake and full-snapshot API with
+authenticated delta push/pull synchronization. The supported client versions
+are Minecraft `1.21.11` and `26.1.2`.
 
-## Identity (every request)
+The server stores opaque item data and does not interpret Minecraft codecs. The
+cross-version item format is specified separately in
+[normalization.md](normalization.md).
+
+## Identity and server ids
+
+Every v2 request identifies the client and bank:
 
 ```json
 {
@@ -14,46 +20,43 @@ and across MC versions (`1.21.11`, `26.1.2`, `26.2`).
   "serverId": "multiplayer/mc_hypixel_net",
   "serverName": "Multiplayer: Hypixel",
   "mcVersion": "1.21.11",
-  "modVersion": "qmsync-1.21.11+cmsync.1"
+  "modVersion": "cmsync"
 }
 ```
 
-* `serverId` is `Coordinate.id()`. For multiplayer: `"multiplayer/" + sanitize(address)`,
-  where `sanitize` replaces every `. : / "` and vanilla illegal filename char with `_`
-  (JackFredLib `Sanitizer`). Examples: `mc.hypixel.net` →
-  `multiplayer/mc_hypixel_net`; `123.45.67.89:25565` → `multiplayer/123_45_67_89_25565`.
-  The address is whatever each player typed in their server list, so the port counts:
-  `play.example.com` and `play.example.com:25565` are DIFFERENT ids — all players must
-  type the address identically. Singleplayer/LAN/realms use `singleplayer/<world>`,
-  `lan/<motd>`, `realms/<hex>` instead.
-  Proxy networks (same server, several addresses): list the extra ids in
-  `SERVER_ID_ALIASES` and the server canonicalizes them into `EXPECTED_SERVER_ID`,
-  so all addresses share one bank instead of splitting. Comparison is
-  case-insensitive; clients additionally lowercase the id on the wire (26.x
-  libraries preserve capitalisation, 1.21.11 lowercases).
-  Server compares this against `EXPECTED_SERVER_ID`. Hub/lobby connections use a different `serverId`
-  and must be rejected/ignored by config.
-* `mcVersion` + `modVersion` drive cross-version normalization (see `normalization.md`).
-* Auth v2 MVP: UUID whitelist + optional per-player token header `X-CMSync-Token`.
-  There are no sessions; every request re-checks `serverId` + whitelist.
+`serverId` comes from the client coordinate id. Multiplayer addresses are
+sanitized into `multiplayer/<address>`. Players must enter the same address,
+including port spelling, unless the server config maps alternate ids through
+`SERVER_ID_ALIASES`. Comparison is case-insensitive.
 
-## Endpoints
+The server checks `EXPECTED_SERVER_ID`, whitelist membership, and the optional
+`X-CMSync-Token` header on every request. There are no sessions.
 
-### `POST <base>/api/handshake`
+## Handshake
 
-Same as v1 + version fields. Responses: `{status: SYNCED, generation}` or
-`{status: ACCESS_DENIED, reason}` (also honors 401/403 for bad tokens).
-Client stores base URL per bank on `SYNCED` only. `generation` newer than the
-client's clears locals (wipe propagation).
+`POST /api/handshake` returns:
 
-### `POST <base>/api/push` (delta, preferred)
+```json
+{"status":"SYNCED","generation":3}
+```
+
+or an access error. A client receiving a newer generation clears its local bank
+before it pushes again.
+
+## Delta push
+
+`POST /api/push` accepts one entry per logical container `(key,pos)`:
 
 ```json
 {
-  "identity...": "...",
-  "baseHash": "sha256-of-last-pulled-merged-state-or-null",
-  "fullHash": "sha256-of-sender-full-normalized-view",
+  "protocolVersion": 2,
+  "playerUuid": "...",
+  "playerName": "Steve",
+  "serverId": "multiplayer/mc_hypixel_net",
+  "mcVersion": "1.21.11",
   "generation": 3,
+  "baseHash": "sha256-or-null",
+  "fullHash": "sha256-of-normalized-view",
   "changes": [
     {
       "key": "minecraft:overworld",
@@ -62,99 +65,93 @@ client's clears locals (wipe propagation).
       "updatedAt": "2026-09-15T18:00:00Z",
       "updatedBy": "uuid",
       "mcVersion": "1.21.11",
-      "items": [{"id": "minecraft:iron_ingot", "count": 64, "componentsDigest": "…"}],
-      "raw": {"v": 2, "mc": "1.21.11", "memory": {"items": [...full NBT...], "name": {...}},
-              "override": {"customName": "...", "manualMode": "..."}}
+      "items": [{"id":"minecraft:iron_ingot","count":64}],
+      "raw": {"v":2,"mc":"1.21.11","memory":{},"portable":{}}
     }
   ]
 }
 ```
 
-* One entry per container `(key,pos)`. `deleted=true` creates a tombstone.
-* `generation` is required and is the server wipe generation learned during handshake/pull. The
-  server rejects a push prepared against an older generation, preventing an
-  in-flight or offline stale snapshot from resurrecting wiped data. Clients
-  should pull and apply the returned generation before retrying.
-* Server applies per-entry LWW on `updatedAt`; stale entries ignored, **ties keep
-  the stored version** (this is what makes lossy fallback reconstructions safe —
-  see `normalization.md`).
-* Partial mass deletes go straight through: bursts (deletes > `MAX_DELETE_COUNT`, default 50,
-  or > `MAX_DELETE_FRACTION`, default 20%, of banks ≥ `MIN_QUARANTINE_BANK`, default 10)
-  trigger a pre-delete snapshot + warning log, then apply.
-* A delete-only push covering every currently stored container in a bank of at least
-  `FULL_WIPE_MIN_BANK` containers (default 10) is treated as a possible client-memory
-  wipe. The server snapshots and returns `QUARANTINED` without applying any changes.
-  This applies only to `/api/push`; the authenticated `/api/wipe` route remains the
-  intentional full-server wipe path. Empty pushes remain ignored as hub-wipe protection.
-* Empty `changes` with `fullHash` matching server = no-op (used for keepalive/hash check).
-* **Empty-bank rule:** if `changes` is empty AND `fullHash` == hash(empty) while server has >0 containers,
-  server ignores (protects hub-wipe). Client must also skip push in that case.
+Rules:
 
-### `GET <base>/api/pull?serverId=…&playerUuid=…&px=…&py=…&pz=…&dim=…`
+- `generation` must equal the server generation. Older pushes receive
+  `STALE_GENERATION` and must pull first.
+- Memory rows and tombstones use one LWW comparison on `updatedAt`. A stale
+  upsert cannot resurrect a newer tombstone, and a stale delete cannot replace a
+  newer delete. Equal timestamps keep the stored value.
+- `items` is the normalized search/aggregation view. `raw` is opaque to the
+  server and may contain native and portable representations.
+- Empty pushes against a non-empty bank are ignored as hub-wipe protection.
+- Partial mass deletes are snapshotted, logged, and applied.
+- A delete-only push covering every currently stored container in a bank with at
+  least `FULL_WIPE_MIN_BANK` containers (default 10) is treated as a possible
+  client memory-bank wipe. The server snapshots the bank and returns
+  `QUARANTINED` without applying the changes. Existing clients recognize this
+  response. The authenticated `/api/wipe` endpoint is unaffected.
 
-Returns the filtered full state (clients LWW-merge it locally; there is no
-incremental cursor — `since` is accepted but unused, kept for compat):
+Successful push responses include `status: SYNCED`, `applied`,
+`skipped_stale`, `containers`, and `revision`.
+
+## Incremental pull
+
+`GET /api/pull?serverId=...&playerUuid=...&since=N&px=...&py=...&pz=...&dim=...`
+returns changes relevant to the client and the newest durable revision:
 
 ```json
 {
-  "status": "SYNCED",
-  "serverTime": 1758...,
-  "cursor": 42,
-  "changes": [ "...same shape as push..." ],
-  "tombstones": [{"key": "...", "pos": "...", "deleted_at": "..."}],
-  "owners": {"<uuid>": "<playerName>"},
-  "generation": 3,
-  "containers": 1234,
-  "revision": 42
+  "status":"SYNCED",
+  "changes":[],
+  "tombstones":[],
+  "owners":{},
+  "generation":3,
+  "revision":42,
+  "cursor":42,
+  "containers":1234
 }
 ```
 
-`revision`/`cursor` is the newest durable server revision included in the
-response. A client sends that number back as `since` on its next pull. With a
-position-gated pull, a durable per-client range cursor makes a stationary pull
-incremental while a move to a new position or dimension returns the current
-relevant state before incremental pulls resume.
+The server keeps a durable change/event log. A stationary client receives only
+events after `since`. If the client moves or changes dimension, the server first
+returns the relevant current state so a previous range cursor cannot hide newly
+nearby containers. The response revision is the value for the next request.
 
-* **Range gate:** with player position (`px,py,pz` + dimension `dim`), nearby Overworld
-  and Nether containers within `RANGE_BLOCKS` (default 5000 Overworld-equivalent blocks)
-  are returned — plus ender-style keys, which have no position and always pass. Nether
-  horizontal coordinates are multiplied by 8 in the comparison, so the default effective
-  radius is 625 Nether blocks; Y is unchanged. Other dimensions remain isolated. Tombstones
-  are gated the same way (positions leak too). Without position params the pull is ungated
-  (old-client compatible).
-* `owners` maps ender-chest key owners to last-seen names (powers profile labels).
-* Ender chests sync under per-player keys (`chesttracker:ender_chest/<uuid>` etc.),
-  so teammates' ender chests never merge — the server treats keys opaquely.
+With `px`, `py`, `pz`, and `dim`, pulls include nearby Overworld and Nether
+containers while the player is in either dimension. Horizontal Nether
+coordinates are multiplied by 8 for the comparison, so `RANGE_BLOCKS=5000`
+means an effective 625-block horizontal Nether radius. Y is unchanged. Other
+dimensions remain isolated. Ender-style keys have no meaningful position and
+always pass the range gate. Without position parameters, the pull is ungated for
+compatibility.
 
-Client merges into loaded `MemoryBankImpl` on client thread (see `mod/src/.../impl/cmsync/CMSyncManager`).
+## Snapshots, restore, and wipe
 
-### Snapshots / restore (backups)
+- `GET /api/snapshots?serverId=...` lists admin-protected snapshots.
+- `POST /api/restore` with `{serverId,snapshotId}` restores a snapshot and bumps
+  the server generation.
+- `POST /api/wipe` is an admin-token two-step operation. A challenge response is
+  followed by confirmation within 60 seconds. It removes memories, tombstones,
+  and owners, keeps recovery snapshots, and advances the generation.
 
-* Server auto-snapshots full merged state every `SNAPSHOT_INTERVAL_MIN` (default 15) into `snapshots` table
-  + keeps filesystem `.backup` via cron (`server/backup.py`).
-* `GET /api/snapshots?serverId=` lists `{id, createdAt, containers}`.
-* `POST /api/restore {serverId, snapshotId}` (admin token) restores.
-* `POST /api/wipe` (admin token, two-step): `{confirm:false}` → `{status:CONFIRM_REQUIRED,
-  challenge, containers, warning}`; then `{confirm:true, challenge}` within 60s →
-  `{status:WIPED, generation, snapshotId, cleared:{...}}`. Wipes memories, tombstones
-  and owners (snapshots kept, pre-wipe snapshot taken) and bumps the wipe `generation`.
-* `generation` rides on handshake/pull responses. Clients holding an older generation
-  clear their local banks on next contact — including players offline during the wipe.
-* Broken/emptied containers propagate as `deleted:true` changes (tombstones, 30d TTL);
-  mass breaks apply straight through (pre-delete snapshot + warning log), an
-  established bank reading completely empty holds pull-only client-side.
-* `GET /health` → `{ok, time, expectedServer, cmsync}` (server behavior version).
-* `GET /api/view/{serverId}` → merged counts for website/Discord (no auth beyond token if configured).
+The client command `/cmsync wipealldata` uses this explicit wipe endpoint. It is
+not subject to the accidental-push quarantine.
 
-## Status strings
+## Other endpoints
 
-`SYNCED | ACCESS_DENIED | URL_NOT_FOUND | NOT_A_CMSYNC_SERVER | CONNECTION_FAILED | VALIDATION_ERROR | QUARANTINED | WIPED | CONFIRM_REQUIRED`
-Same chat semantics as QMSync: report failure once per outage, recovery once.
-(`QUARANTINED` is emitted when the exact full-bank delete guard holds.)
+- `GET /health` returns service health and server identity.
+- `GET /api/view/{serverId}` returns normalized aggregate totals for web/Discord
+  consumers.
+- `GET /api/pullWebPage` returns an authenticated full read view for the website.
+- `POST /api/sync` remains a compatibility endpoint for old v1 clients.
 
-## Compatibility
+## Status values
 
-* v1 clients (`POST /api/sync` full snapshot) still accepted: server diffs snapshot into deltas internally.
-* v2 clients send `protocolVersion: 2`. Server rejects unknown major with HTTP 400.
-* Cross-version item rules: `normalization.md` (the `schema.json` once referenced
-  here was never written — the JSON shapes above are the spec).
+`SYNCED`, `ACCESS_DENIED`, `STALE_GENERATION`, `URL_NOT_FOUND`,
+`NOT_A_CMSYNC_SERVER`, `CONNECTION_FAILED`, `VALIDATION_ERROR`, `QUARANTINED`,
+`WIPED`, and `CONFIRM_REQUIRED`.
+
+## Related documentation
+
+- [Portable item/component format](normalization.md)
+- [Repository architecture](../docs/ARCHITECTURE.md)
+- [Server setup](../server/START-HERE.md)
+- [Testing and manual verification](../docs/TESTING.md)

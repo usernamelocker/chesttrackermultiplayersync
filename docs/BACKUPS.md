@@ -15,6 +15,11 @@ Two layers; either alone recovers a wipe.
 
 ## 2. Filesystem `.backup` (cron, survives SQLite corruption)
 
+Partial mass deletes are snapshotted before being applied. An exact full-bank
+delete push is snapshotted and returned as `QUARANTINED` without being applied.
+For an accidental full-bank push, restore its snapshot; for an intentional wipe,
+use `/cmsync wipealldata`, which is not blocked by the push guard.
+
 ```cron
 */15 * * * * /opt/cmsync/.venv/bin/python /opt/cmsync/backup.py
 ```

@@ -21,6 +21,12 @@ Memory Bank menu (`` ` `` key → pencil icon):
 
 ## Server side
 
+The server's full-bank delete protection is independent of player credentials:
+an exact delete-only push covering an established bank is returned as
+`QUARANTINED`, while `/cmsync wipealldata` remains the explicit admin wipe path.
+See the [protocol contract](../protocol/PROTOCOL.md) and
+[backup/recovery guide](BACKUPS.md).
+
 Two modes (see `server/stack.env.example`):
 
 * **Token mode** (simplest): `WHITELIST_UUIDS` empty + `SHARED_TOKEN` set.
