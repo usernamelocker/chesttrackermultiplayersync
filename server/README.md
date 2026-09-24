@@ -12,7 +12,7 @@ cd server
 python -m venv .venv; .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 copy .env.example .env   # set EXPECTED_SERVER_ID + SHARED_TOKEN (see below)
-python -m pytest test_api.py test_server.py   # 5 tests, no server needed
+   python -m pytest test_api.py test_server.py   # no server needed
 uvicorn app:app --host 127.0.0.1 --port 8000
 curl http://127.0.0.1:8000/health
 ```

@@ -28,6 +28,10 @@ The server in repo-root `server/` serves all versions.
 
 ## In-game
 
+The server may return `QUARANTINED` for a suspected exact full-bank delete push;
+existing clients keep their local state and report the held wipe. The explicit
+`/cmsync wipealldata` command remains allowed.
+
 Memory Bank menu (`` ` `` key → pencil icon):
 
 * **Sync tab** — server URL (`https://host:port` or `host:port`), shared token
@@ -67,7 +71,7 @@ server tests live in `server/` (`pytest test_api.py test_server.py`).
 | `sendChat` | `player.displayClientMessage(msg, false)` | `player.sendSystemMessage(msg)` |
 | Commands registration | `ClientCommandManager` | `ClientCommands` |
 | Litematica mixin anchor | `initGui` TAIL (same shape both branches) | `initGui` TAIL (same shape both branches) |
-| Releases | `cmsync-1.21.11-N` | `cmsync-26.1.2-N` |
+| Releases | `chesttracker-*-mc1.21.11.jar` | `chesttracker-*-mc26.1.2.jar` |
 
 Porting rule: keep the overlay logic identical; only adapt call sites the compiler
 rejects. Protocol (`protocol/PROTOCOL.md`) is version-frozen at v2.

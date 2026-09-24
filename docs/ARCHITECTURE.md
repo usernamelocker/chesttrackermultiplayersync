@@ -1,55 +1,71 @@
 # Architecture
 
-```
-┌─ Client (1.21.11 + impl/cmsync) ─┐   ┌─ Client (26.1.2 + same overlay) ─┐
-│ local bank (offline cache)        │   │ local bank                       │
-│ CMSyncManager tick:               │   │ CMSyncManager tick:              │
-│  snapshot + full NBT → POST /push │──▶│                                  │
-│  GET /pull → LWW merge into bank  │◀──│                                  │
-└───────────────────────────────────┘   └──────────────────────────────────┘
-                              │ HTTP(S)
-                              ▼
-              ┌─ VPS: FastAPI + SQLite (WAL) ─┐
-              │ memories (server,key,pos PK)  │  LWW on updatedAt (ties keep stored)
-              │ tombstones (30d TTL)          │  single deletes propagate
-              │ snapshots (every 15min, keep) │  mass deletes: snapshot + warn, apply
-              │ GET /api/view → website/Discord│
-              └───────────────────────────────┘
+CMSync has two independent client builds and one shared server implementation.
+The clients retain an offline-first local memory bank; the server is an
+authenticated merge and distribution layer.
+
+```text
+Client 1.21.11 --+                         +-- local bank + CMSyncManager
+                 +-- HTTPS push/pull -------+
+Client 26.1.2  --+                         +-- local bank + CMSyncManager
+                                              |
+                              FastAPI + SQLite server
+                              memories and tombstones
+                              revisions and change events
+                              snapshots and generations
 ```
 
-## Why this shape
+## Design decisions
 
-* **No direct DB from clients** (no creds in jars, no JDBC on Fabric).
-* **Local bank always works offline** — server is a merge layer, not a live dependency.
-* **Per-container LWW** `(key,pos)` + `updatedAt` avoids full-bank clobber.
-* **Cross-version:** merge/search/count on normalized `{id,count}`; full NBT rides
-  along opaquely (`raw`) for same-version restores — see
-  [`../protocol/normalization.md`](../protocol/normalization.md).
-* Ender chests sync under per-player keys, never merged across players.
+- Clients never access SQLite directly and never receive database credentials.
+- Local memory remains usable while offline. Successful server responses are
+  required before a change is considered synchronized.
+- A logical container is `(server_id, key, pos)`. Memory rows and tombstones are
+  compared through the same LWW version, so stale updates cannot resurrect a
+  newer deletion.
+- Normalized item data powers identity, search, counts, and the website view.
+  Native serialization and the portable item envelope preserve richer data; see
+  [item normalization](../protocol/normalization.md).
+- Ender-style keys include the player identity and therefore do not merge
+  different players' ender chests.
 
 ## Data flow
 
-1. Player opens chest → provider → `MemoryKeyImpl.add(pos, memory)` with
-   `realTimestamp=now` (nested NBT, e.g. shulker contents, kept in the stack).
-2. `CMSyncManager.tick` (every `intervalSeconds`): ItemStack copies + detached
-   `Memory` clones on the client thread → encode + hash + `POST /api/push` on the
-   queue lane. Deletes detected against the last snapshot ride as tombstones.
-3. Server: `serverId` (case-insensitive) + token check → hub-wipe guard (empty push
-   vs non-empty store ignored) → mass-delete snapshot + warning → `apply_changes`
-   LWW → periodic snapshot.
-4. Client `GET /api/pull` (range-gated: nearby Overworld/Nether containers within
-   5000 Overworld-equivalent blocks; Nether horizontal coordinates use the 1:8
-   scale, ender keys exempt, other dimensions isolated) → same-version full-NBT
-   restore, else names+counts fallback **stamped
-   with the observation time** (never `now` — see normalization.md) → merge on
-   client thread → search/render picks it up.
-5. Website: `GET /api/view/{serverId}` aggregates normalized totals.
+1. A memory provider records a container observation with its observation time.
+2. `CMSyncManager` snapshots and detaches client-thread data, encodes it, and
+   sends a delta to `/api/push` on the background queue.
+3. The server checks identity, authentication, and generation. Empty pushes
+   against a non-empty bank are ignored. A delete-only push covering every
+   stored container in an established bank is snapshotted and returned as
+   `QUARANTINED`; it is not applied. Partial mass deletes are snapshotted,
+   logged, and applied.
+4. The client calls `/api/pull?since=N`. Durable revisions provide incremental
+   delivery while stationary; moving or changing dimension causes the client to
+   receive the relevant current state before incremental delivery resumes.
+5. Spatial pulls include nearby Overworld and Nether containers while the player
+   is in either dimension. Nether horizontal coordinates are scaled by 8 when
+   compared with the Overworld-equivalent range. Other dimensions are isolated;
+   ender-style keys have no meaningful position and bypass the range gate.
+6. The client LWW-merges the response on the client thread. Same-version native
+   data is preferred, then portable data, then normalized fallback data.
+7. `/api/view/{serverId}` aggregates `items_norm` for website/Discord consumers.
+
+## Wipes, restore, and recovery
+
+`/cmsync wipealldata` calls the authenticated two-step `/api/wipe` endpoint. A
+successful wipe keeps a snapshot, clears memories/tombstones/owners, increments
+the generation, and causes returning offline clients to clear stale local data.
+The push quarantine does not block this explicit admin action.
+
+An accidental full-bank push returns a `snapshotId` and logs
+`FULL WIPE QUARANTINED`. Restore it through `/api/restore`; operational details
+are in [BACKUPS.md](BACKUPS.md) and [PORTAINER.md](../server/PORTAINER.md).
 
 ## Key files
 
-* `protocol/PROTOCOL.md`, `protocol/normalization.md`
-* `server/app.py`, `server/db.py`, `server/models.py`, `server/config.py`,
-  `server/backup.py`, `server/smoke.py`
-* `mod/src/client/java/red/jackf/chesttracker/impl/cmsync/*` (7 files),
-  `impl/memory/EnderChestKeys.java`, Sync/CM Settings tabs in
-  `impl/gui/screen/EditMemoryBankScreen.java`
+- Protocol: `protocol/PROTOCOL.md`, `protocol/normalization.md`
+- Server: `server/app.py`, `server/db.py`, `server/models.py`,
+  `server/config.py`, `server/backup.py`
+- Client sync: `mod/src/client/java/red/jackf/chesttracker/impl/cmsync/`
+- Ender profiles: `mod/src/client/java/red/jackf/chesttracker/impl/memory/EnderChestKeys.java`
+- Retired overlay: `client/overlay/README.md`

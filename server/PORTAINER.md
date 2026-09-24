@@ -16,6 +16,10 @@ This file is the operations companion.
 
 ## Update / redeploy
 
+The full environment reference is [`stack.env.example`](stack.env.example),
+including `FULL_WIPE_MIN_BANK`, which protects established banks from accidental
+full-bank delete pushes. Partial deletes are not blocked.
+
 Stacks → stack → **Update the stack WITH rebuild** (toggle it on). A plain
 container restart keeps the old code — rebuild pulls the new code from GitHub.
 Watch Containers → `cmsync` → **Logs** for `Uvicorn running`, then

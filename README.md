@@ -1,66 +1,72 @@
 # ChestTracker Multiplayer Sync (CMSync)
 
-Shared ChestTracker state for a private group: **in-game shared search across players,
-per-player ender chest profiles, plus a website/Discord read view** — backed by a small
-self-hosted server. Cross-version: **`1.21.11` and `26.1.2` clients sync together**
-against the same `serverId`.
+CMSync shares ChestTracker memory state between players through a self-hosted
+FastAPI/SQLite server. It supports shared search, per-player ender-chest
+profiles, cross-version item data, and a website/Discord read view.
 
-## Start here (pick one)
+Supported client versions are Minecraft `1.21.11` and `26.1.2`.
 
-| You are… | Do this |
+## Start here
+
+| You are... | Read |
 |---|---|
-| **Playing** (just want the mod) | Download the jar for your MC version from [GitHub Releases](https://github.com/usernamelocker/chesttrackermultiplayersync/releases) (`cmsync-1.21.11-*` or `cmsync-26.1.2-*`). Needs Fabric API + YACL. Then [connect in-game](docs/TOKENS.md). |
-| **Hosting the server** | Follow [`server/START-HERE.md`](server/START-HERE.md) (Portainer, ~5 min). Reference: [`server/PORTAINER.md`](server/PORTAINER.md), [`server/README.md`](server/README.md). |
-| **Building the mod** | [`mod/CMSYNC.md`](mod/CMSYNC.md) — branches, prereqs (Java 21 vs 25), build commands. |
-| **Debugging sync** | [`docs/TOKENS.md`](docs/TOKENS.md) (access modes) + `cmsync.log` in `<game>/chesttracker/` (every cycle, handshake, wipe and transport error, with reasons). |
+| Playing | Download the matching jar from [GitHub Releases](https://github.com/usernamelocker/chesttrackermultiplayersync/releases), then follow [Tokens & access](docs/TOKENS.md). |
+| Hosting | Follow [server/START-HERE.md](server/START-HERE.md). Use [Portainer operations](server/PORTAINER.md) for redeploys and diagnosis. |
+| Building | Read [mod/CMSYNC.md](mod/CMSYNC.md) for branches, Java versions, and build commands. |
+| Debugging | Read [docs/TESTING.md](docs/TESTING.md) and inspect `chesttracker/cmsync.log`. |
 
-## How it works (60 seconds)
+## How it works
 
-- Each bank syncs to a server-side store keyed by `serverId` (`multiplayer/<address>`,
-  case-insensitive, aliases merge — see [`protocol/PROTOCOL.md`](protocol/PROTOCOL.md)).
-- Merge is **per-container** `(key, pos)`, last-observation-wins on `updatedAt`.
-  Broken/emptied containers propagate as **tombstones**; pulls are **range-gated**
-  across nearby Overworld/Nether containers (5000 Overworld-equivalent blocks;
-  625 Nether blocks horizontally by default); other dimensions remain isolated.
-  Ender-style keys always pass.
-- Pushes carry full-fidelity NBT (`raw`) for same-version restores plus a
-  names+counts view for search and cross-version fallback. Fallback reconstructions
-  keep the observation time, so lossy data can never outrank genuine records
-  (see [`protocol/normalization.md`](protocol/normalization.md)).
-- Mass deletes apply straight through (server snapshots first + warns); only a
-  fully-empty push against a non-empty server is ignored (hub-wipe protection).
-- `/cmsync wipealldata` (admin token, two-step) zeroes a server and bumps a
-  generation counter so offline clients clear on return. Snapshots are kept.
+- Each bank is keyed by `serverId`; aliases can be canonicalized by the server.
+- Synchronization is per container `(key, pos)` using last-observation-wins
+  timestamps. Memory rows and tombstones share one logical LWW stream.
+- Pushes include normalized `{id,count}` data for search and aggregation, native
+  data for same-version fidelity, and a portable component envelope for
+  cross-version decoding and foreign-component preservation. See
+  [protocol/normalization.md](protocol/normalization.md).
+- Pulls are incremental using durable revisions and are range-gated. While a
+  player is in the Overworld or Nether, nearby containers from both dimensions
+  are eligible; Nether horizontal coordinates use the 1:8 portal scale. Other
+  dimensions remain isolated and ender-style keys are exempt from spatial gating.
+- Partial mass deletes are snapshotted and applied. A delete-only push covering
+  every stored container in an established bank is snapshotted and returned as
+  `QUARANTINED` instead of being applied. Empty pushes against a non-empty bank
+  are also ignored as hub-wipe protection.
+- `/cmsync wipealldata` is the intentional admin wipe path. It clears server
+  state, advances the generation, and causes offline clients to clear stale
+  local state when they return.
 
-## Layout
+## Repository layout
 
+```text
+mod/                Buildable mod source. main = 1.21.11; 26.1.2 = 26.1.2.
+server/             FastAPI + SQLite authoritative store and deployment files.
+protocol/           HTTP contract and cross-version item format.
+docs/               Architecture, access, testing, and backup guides.
+client/overlay/      Retired patch copies; mod/ is the source of truth.
+releases/            Local ignored artifacts; published assets live on GitHub.
 ```
-chesttrackermultiplayersync/
-  mod/                Buildable mod source. main branch = 1.21.11, 26.1.2 branch = 26.1.2.
-                      The CMSync overlay lives in mod/src/.../impl/cmsync/ (see mod/CMSYNC.md).
-  server/             FastAPI + SQLite authoritative store (app.py, db.py, models.py,
-                      backup.py). Deploys via Portainer from server/docker-compose.yml.
-  protocol/           HTTP contract (PROTOCOL.md) + item normalization rules (normalization.md).
-  docs/               ARCHITECTURE.md, TOKENS.md, TESTING.md, BACKUPS.md.
-  client/overlay/     Retired: early patch copies. mod/ is the source of truth.
-  releases/           Local jar copies (gitignored). Real releases are on GitHub.
-```
 
-## Docs index
+## Documentation index
 
-- Protocol: [`protocol/PROTOCOL.md`](protocol/PROTOCOL.md), [`protocol/normalization.md`](protocol/normalization.md)
-- Server: [`server/START-HERE.md`](server/START-HERE.md) (setup), [`server/PORTAINER.md`](server/PORTAINER.md) (operations), [`server/README.md`](server/README.md) (local dev), [`server/stack.env.example`](server/stack.env.example) (env reference)
-- Mod: [`mod/CMSYNC.md`](mod/CMSYNC.md) (build + in-game use), [`mod/README.md`](mod/README.md) (upstream mod manual)
-- Concepts: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/TOKENS.md`](docs/TOKENS.md), [`docs/TESTING.md`](docs/TESTING.md), [`docs/BACKUPS.md`](docs/BACKUPS.md)
+- Protocol: [PROTOCOL.md](protocol/PROTOCOL.md), [normalization.md](protocol/normalization.md)
+- Server: [START-HERE.md](server/START-HERE.md), [PORTAINER.md](server/PORTAINER.md),
+  [README.md](server/README.md), [stack.env.example](server/stack.env.example)
+- Mod: [CMSYNC.md](mod/CMSYNC.md), [upstream mod README](mod/README.md)
+- Concepts: [ARCHITECTURE.md](docs/ARCHITECTURE.md), [TOKENS.md](docs/TOKENS.md),
+  [TESTING.md](docs/TESTING.md), [BACKUPS.md](docs/BACKUPS.md)
 
-## Branches & releases
+## Branches and releases
 
-- `main` → MC 1.21.11 · `26.1.2` → MC 26.1.2. The server (`server/`) serves all versions.
-- Releases are per version (`cmsync-1.21.11-N`, `cmsync-26.1.2-N`), each with the exact
-  commit hash in the jar name. Server and protocol stay backward compatible —
-  update clients freely, redeploy the server stack when server files change.
+- `main` builds Minecraft `1.21.11`.
+- `26.1.2` builds Minecraft `26.1.2`.
+- Releases contain `chesttracker-*-mc1.21.11.jar` and
+  `chesttracker-*-mc26.1.2.jar`, plus `SHA256SUMS.txt`.
+- Redeploy the server stack whenever files under `server/` change. Client jars
+  and server code are released together for compatibility, but server-only
+  fixes do not require new client logic.
 
 ## License
 
-The mod links against ChestTracker upstream: **LGPL-3.0**, see [`mod/LICENSE`](mod/LICENSE) —
-keep any mod fork public and preserve credits.
+The mod links against ChestTracker upstream under LGPL-3.0; see
+[mod/LICENSE](mod/LICENSE).
