@@ -78,11 +78,14 @@ client's clears locals (wipe propagation).
 * Server applies per-entry LWW on `updatedAt`; stale entries ignored, **ties keep
   the stored version** (this is what makes lossy fallback reconstructions safe —
   see `normalization.md`).
-* **Mass deletes go straight through:** bursts (deletes > `MAX_DELETE_COUNT`, default 50,
+* Partial mass deletes go straight through: bursts (deletes > `MAX_DELETE_COUNT`, default 50,
   or > `MAX_DELETE_FRACTION`, default 20%, of banks ≥ `MIN_QUARANTINE_BANK`, default 10)
-  trigger a pre-delete snapshot + warning log, then apply. Only fully-empty pushes are
-  ignored (hub-wipe protection); an established bank reading completely empty is held
-  client-side instead.
+  trigger a pre-delete snapshot + warning log, then apply.
+* A delete-only push covering every currently stored container in a bank of at least
+  `FULL_WIPE_MIN_BANK` containers (default 10) is treated as a possible client-memory
+  wipe. The server snapshots and returns `QUARANTINED` without applying any changes.
+  This applies only to `/api/push`; the authenticated `/api/wipe` route remains the
+  intentional full-server wipe path. Empty pushes remain ignored as hub-wipe protection.
 * Empty `changes` with `fullHash` matching server = no-op (used for keepalive/hash check).
 * **Empty-bank rule:** if `changes` is empty AND `fullHash` == hash(empty) while server has >0 containers,
   server ignores (protects hub-wipe). Client must also skip push in that case.
@@ -147,8 +150,7 @@ Client merges into loaded `MemoryBankImpl` on client thread (see `mod/src/.../im
 
 `SYNCED | ACCESS_DENIED | URL_NOT_FOUND | NOT_A_CMSYNC_SERVER | CONNECTION_FAILED | VALIDATION_ERROR | QUARANTINED | WIPED | CONFIRM_REQUIRED`
 Same chat semantics as QMSync: report failure once per outage, recovery once.
-(`QUARANTINED` is still classified client-side but the server no longer emits it —
-mass deletes snapshot + apply instead.)
+(`QUARANTINED` is emitted when the exact full-bank delete guard holds.)
 
 ## Compatibility
 

@@ -49,6 +49,10 @@ SNAPSHOT_KEEP = int(os.environ.get("SNAPSHOT_KEEP", "96"))
 MAX_DELETE_FRACTION = float(os.environ.get("MAX_DELETE_FRACTION", "0.20"))
 MAX_DELETE_COUNT = int(os.environ.get("MAX_DELETE_COUNT", "50"))
 MIN_QUARANTINE_BANK = int(os.environ.get("MIN_QUARANTINE_BANK", "10"))
+# A full-bank delete is held only when the bank is at least this large. This
+# protects established banks without interfering with intentional cleanup of a
+# small test bank or a partial delete.
+FULL_WIPE_MIN_BANK = int(os.environ.get("FULL_WIPE_MIN_BANK", "10"))
 # Range gate: pull only returns same-dimension containers within this many
 # Overworld-equivalent blocks of the requesting player (+ ender-style keys,
 # which have no position). Nether horizontal coordinates use the 1:8 portal
