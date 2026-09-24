@@ -118,6 +118,15 @@ bulk = [change("minecraft:overworld", f"{i},64,0", 11,
 r = c.post("/api/push", json=dict(ident(ALICE), fullHash="h2", changes=bulk)).json()
 assert r["status"] == "SYNCED", r
 assert c.get(f"/api/view/{SID}").json()["containers"] == 62
+full_wipe = [change("minecraft:overworld", f"{i},64,0", 12, [], deleted=True)
+             for i in range(60)] + [
+                 change("minecraft:overworld", "1,2,3", 12, [], deleted=True),
+                 change("minecraft:overworld", "4,5,6", 12, [], deleted=True),
+             ]
+r = c.post("/api/push", json=dict(ident(ALICE), fullHash="full-wipe", changes=full_wipe)).json()
+assert r["status"] == "QUARANTINED" and r["applied"] == 0 and r["snapshotId"], r
+assert r["containers"] == 62 and c.get(f"/api/view/{SID}").json()["containers"] == 62, r
+print("full wipe quarantine ok")
 wiped = [change("minecraft:overworld", f"{i},64,0", 12, [], deleted=True) for i in range(55)]
 r = c.post("/api/push", json=dict(ident(ALICE), fullHash="h3", changes=wiped)).json()
 assert r["status"] == "SYNCED" and r["applied"] == 55, r  # mass deletes apply (snapshot+warn server-side)

@@ -150,15 +150,36 @@ def push(req: PushRequest, x_cmsync_token: str | None = Header(default=None, ali
                 "containers": existing,
             })
 
-        db.record_owners(con, sid, changes, req.playerUuid, req.playerName)
-
         # Hub-wipe protection: empty push against non-empty server = ignore, keep snapshot.
         if not changes and existing > 0:
             return {"status": "SYNCED", "applied": 0, "skipped_stale": 0,
                     "note": "ignored empty push (possible hub-wipe)", "containers": existing}
 
-        # Mass deletes go straight through (with a pre-delete snapshot + warning log
-        # so accidents stay recoverable). Only fully-empty pushes are ignored (hub-wipe).
+        # A delete-only request that covers every established container is a
+        # likely local-bank wipe. Snapshot and hold it for recovery. This guard
+        # applies only to pushes; the admin /api/wipe route remains intentional.
+        if db.full_wipe_detected(con, sid, changes, config.FULL_WIPE_MIN_BANK):
+            snap_id = db.take_snapshot(con, sid, config.SNAPSHOT_KEEP)
+            revision = db.get_revision(con, sid)
+            _log.warning("FULL WIPE QUARANTINED %s: %s deletes covering %s stored "
+                         "by %s (snapshot %s)",
+                         sid, deletes, existing, req.playerUuid, snap_id)
+            return {
+                "status": "QUARANTINED",
+                "applied": 0,
+                "skipped_stale": 0,
+                "containers": existing,
+                "generation": current_generation,
+                "revision": revision,
+                "snapshotId": snap_id,
+                "reason": "possible client memory-bank wipe; server state preserved",
+                "note": "use /cmsync wipealldata for an intentional full server wipe",
+            }
+
+        db.record_owners(con, sid, changes, req.playerUuid, req.playerName)
+
+        # Partial mass deletes go straight through (with a pre-delete snapshot
+        # + warning log so accidents stay recoverable).
         if deletes > 0 and db.mass_delete_detected(existing, deletes,
                                             config.MAX_DELETE_FRACTION, config.MAX_DELETE_COUNT,
                                             config.MIN_QUARANTINE_BANK):

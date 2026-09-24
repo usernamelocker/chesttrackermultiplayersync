@@ -502,6 +502,29 @@ def should_quarantine_mass_delete(*args, **kwargs) -> bool:
     """Backward-compat alias (the quarantine itself was removed)."""
     return mass_delete_detected(*args, **kwargs)
 
+
+def full_wipe_detected(con: sqlite3.Connection, server_id: str,
+                       changes: list[dict], min_bank: int = 10) -> bool:
+    """Return true only for a delete-only request covering the whole bank.
+
+    This is deliberately narrower than ``mass_delete_detected``. Partial mass
+    deletes remain valid; this guard exists for clients that accidentally turn
+    their entire local memory bank into deletion tombstones (for example after
+    changing proxy/server identity on a hub).
+    """
+    if not changes or any(not c.get("deleted") for c in changes):
+        return False
+
+    rows = con.execute(
+        "SELECT key,pos FROM memories WHERE server_id=?", (server_id,)
+    ).fetchall()
+    existing = {(row["key"], row["pos"]) for row in rows}
+    if len(existing) < min_bank:
+        return False
+
+    requested = {(c.get("key"), c.get("pos")) for c in changes}
+    return existing.issubset(requested)
+
 def is_empty_hash_push(full_hash: str, changes: list) -> bool:
     # Client sends sha256("[]")-style empty marker when it has nothing; server double-checks.
     # We treat any push with zero changes as potential hub-wipe and let caller decide via counts.

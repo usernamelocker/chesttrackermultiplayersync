@@ -109,6 +109,25 @@ def test_mass_delete_guard():
     print("guard ok")
 
 
+def test_full_wipe_detector_only_matches_the_whole_bank():
+    p = _tmpdb()
+    con = db.connect(p)
+    s = "multiplayer/full-wipe"
+    changes = [_chg("minecraft:overworld", f"{i},64,0", 10) for i in range(10)]
+    assert db.apply_changes(con, s, changes)["applied"] == 10
+
+    all_deletes = [_chg(c["key"], c["pos"], 11, deleted=True) for c in changes]
+    assert db.full_wipe_detected(con, s, all_deletes, min_bank=10) is True
+
+    partial = all_deletes[:-1]
+    assert db.full_wipe_detected(con, s, partial, min_bank=10) is False
+    mixed = partial + [_chg(changes[-1]["key"], changes[-1]["pos"], 11)]
+    assert db.full_wipe_detected(con, s, mixed, min_bank=10) is False
+    assert db.full_wipe_detected(con, s, all_deletes, min_bank=11) is False
+    con.close()
+    print("full wipe detector ok")
+
+
 def _chg(key, pos, hour, deleted=False):
     return {"key": key, "pos": pos, "deleted": deleted, "updatedAt": f"2026-09-15T{hour:02d}:00:00Z",
             "updatedBy": "a", "mcVersion": "1.21.11",
@@ -217,6 +236,7 @@ if __name__ == "__main__":
     test_incremental_change_log()
     test_range_cursor_does_not_skip_on_move()
     test_mass_delete_guard()
+    test_full_wipe_detector_only_matches_the_whole_bank()
     test_range_gate()
     test_nether_range_gate_uses_overworld_equivalent_distance()
     test_snapshot_restore()
