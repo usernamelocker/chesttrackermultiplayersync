@@ -16,11 +16,14 @@ older `1.21.11` and `26.1.2` releases share protocol v2 with it.
 
 ## Branches and builds
 
-- `main` targets Minecraft `1.21.11` and builds with Java 21.
+- `26.2` is the default branch, targets Minecraft `26.2`, and builds with Java 25.
 - `26.1.2` targets Minecraft `26.1.2` and builds with Java 25.
-- The 26.2 update targets Minecraft `26.2` and builds with Java 25.
+- `1.21.11` targets Minecraft `1.21.11` and builds with Java 21.
+- `main` follows the latest 26.2 code and remains the existing VPS deployment ref.
+- Server runtime and deployment files must match across all four refs. A client
+  upgrade does not require a server-code migration or database migration.
 - Build from `mod/` with `gradlew.bat build --no-daemon`.
-- The mod's `test` task checks the portable codec against the game registry.
+- On `26.2`/`main`, the mod's `test` task checks the portable codec against the game registry.
 - Run server tests with `python -m pytest test_api.py test_server.py` from
   `server/`; also include `test_portable_format.py` and `test_cross_version.py`.
   `test_api.py` exercises the FastAPI contract without a server.

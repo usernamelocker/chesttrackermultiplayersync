@@ -108,7 +108,7 @@ def favicon():
 def handshake(req: HandshakeRequest, x_cmsync_token: str | None = Header(default=None, alias="X-CMSync-Token")):
     if req.protocolVersion != 2:
         raise HTTPException(400, "unsupported protocolVersion")
-    sid = config.canonical_server_id(req.serverId).lower()
+    sid = config.canonical_server_id(req.serverId)
     if config.EXPECTED_SERVER_ID and sid != config.EXPECTED_SERVER_ID:
         _log.warning("handshake DENIED wrong-serverId player=%s got=%s want=%s",
                      req.playerUuid, req.serverId, config.EXPECTED_SERVER_ID)
@@ -125,7 +125,7 @@ def push(req: PushRequest, x_cmsync_token: str | None = Header(default=None, ali
     # access check per request (no sessions)
     if req.protocolVersion != 2:
         raise HTTPException(400, "unsupported protocolVersion")
-    sid = config.canonical_server_id(req.serverId).lower()
+    sid = config.canonical_server_id(req.serverId)
     if config.EXPECTED_SERVER_ID and sid != config.EXPECTED_SERVER_ID:
         return _deny("wrong serverId")
     try:
@@ -208,7 +208,7 @@ def pull(serverId: str = Query(...), since: int | None = Query(default=None, ge=
          px: int | None = Query(default=None), py: int | None = Query(default=None),
          pz: int | None = Query(default=None), dim: str | None = Query(default=None),
          x_cmsync_token: str | None = Header(default=None, alias="X-CMSync-Token")):
-    sid = config.canonical_server_id(serverId).lower()
+    sid = config.canonical_server_id(serverId)
     if config.EXPECTED_SERVER_ID and sid != config.EXPECTED_SERVER_ID:
         _log.warning("pull DENIED wrong-serverId player=%s got=%s want=%s",
                      playerUuid, serverId, config.EXPECTED_SERVER_ID)
@@ -232,7 +232,7 @@ def pull(serverId: str = Query(...), since: int | None = Query(default=None, ge=
 def pullWebPage(serverId: str = Query(...), since: str | None = Query(default=None),
          playerUuid: str = Query(...),
          x_cmsync_token: str | None = Header(default=None, alias="X-CMSync-Token")):
-    sid = config.canonical_server_id(serverId).lower()
+    sid = config.canonical_server_id(serverId)
     if config.EXPECTED_SERVER_ID and sid != config.EXPECTED_SERVER_ID:
         return {"status": "ACCESS_DENIED", "reason": "wrong serverId"}
     denied = _gate(playerUuid, x_cmsync_token)
@@ -245,9 +245,9 @@ def pullWebPage(serverId: str = Query(...), since: str | None = Query(default=No
             for pos, mem in positions.items():
                 if since and mem.get("updatedAt", "") <= since:
                     continue
-                changes.append({"key": key, "pos": pos, "deleted": False, **mem})
+                changes.append({"key": key, "deleted": False, **mem})
         tombs = [dict(r) for r in con.execute(
-            "SELECT key,pos,deleted_at FROM tombstones WHERE server_id=?", (sid,))]
+            "SELECT key,deleted_at FROM tombstones WHERE server_id=?", (sid,))]
         return {"status": "SYNCED", "serverTime": time.time(), "cursor": since or "",
                 "changes": changes, "tombstones": tombs, "owners": db.get_owners(con, sid),
                 "containers": sum(len(v) for v in state.values())}
@@ -255,7 +255,7 @@ def pullWebPage(serverId: str = Query(...), since: str | None = Query(default=No
 @app.get("/api/view/{server_id:path}")
 def view(server_id: str):
     """Website/Discord read model: aggregated counts from normalized items."""
-    sid = config.canonical_server_id(server_id).lower()
+    sid = config.canonical_server_id(server_id)
     with _con() as con:
         state = db.full_state(con, sid)
     totals: dict[str, int] = {}
@@ -272,7 +272,7 @@ def snapshots(serverId: str,
     if not config.ADMIN_TOKEN or x_cmsync_token != config.ADMIN_TOKEN:
         raise HTTPException(401, "admin only")
     with _con() as con:
-        return {"snapshots": db.list_snapshots(con, config.canonical_server_id(serverId).lower())}
+        return {"snapshots": db.list_snapshots(con, config.canonical_server_id(serverId))}
 
 @app.post("/api/restore")
 def restore(body: dict, x_cmsync_token: str | None = Header(default=None, alias="X-CMSync-Token")):
@@ -295,7 +295,7 @@ def restore(body: dict, x_cmsync_token: str | None = Header(default=None, alias=
 def wipe(body: dict, x_cmsync_token: str | None = Header(default=None, alias="X-CMSync-Token")):
     if not config.ADMIN_TOKEN or x_cmsync_token != config.ADMIN_TOKEN:
         raise HTTPException(401, "admin only")
-    sid = config.canonical_server_id(body.get("serverId", "")).lower()
+    sid = config.canonical_server_id(body.get("serverId", ""))
     if config.EXPECTED_SERVER_ID and sid != config.EXPECTED_SERVER_ID:
         return {"status": "ACCESS_DENIED", "reason": "wrong serverId"}
     with _con() as con:
@@ -338,7 +338,7 @@ def sync_v1(body: dict, x_cmsync_token: str | None = Header(default=None, alias=
     ident_keys = ("playerUuid", "serverId")
     if not all(k in body for k in ident_keys):
         raise HTTPException(400, "bad v1 payload")
-    sid = config.canonical_server_id(body.get("serverId", "")).lower()
+    sid = config.canonical_server_id(body.get("serverId", ""))
     if config.EXPECTED_SERVER_ID and sid != config.EXPECTED_SERVER_ID:
         return {"status": "ACCESS_DENIED"}
     # NOTE: v1 has no token header; in token mode (whitelist empty + SHARED_TOKEN

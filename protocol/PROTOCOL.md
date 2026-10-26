@@ -142,7 +142,8 @@ not subject to the accidental-push quarantine.
 - `GET /health` returns service health and server identity.
 - `GET /api/view/{serverId}` returns normalized aggregate totals for web/Discord
   consumers.
-- `GET /api/pullWebPage` returns an authenticated full read view for the website.
+- `GET /api/pullWebPage` returns an authenticated full read view for the website,
+  omitting container and tombstone coordinates. Game clients use `/api/pull`.
 - `POST /api/sync` remains a compatibility endpoint for old v1 clients.
 
 ## Status values

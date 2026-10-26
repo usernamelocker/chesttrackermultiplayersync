@@ -42,7 +42,7 @@ run on an older game. Back up your local memory banks before upgrading.
 ## Repository layout
 
 ```text
-mod/                Buildable client source; this update targets 26.2.
+mod/                Buildable client source for the checked-out version branch.
 server/             FastAPI + SQLite authoritative store and deployment files.
 protocol/           HTTP contract and cross-version item format.
 docs/               Architecture, access, testing, and backup guides.
@@ -61,10 +61,17 @@ releases/            Local ignored artifacts; published assets live on GitHub.
 
 ## Branches and releases
 
-- `codex/minecraft-26.2` contains the primary Minecraft `26.2` client update.
-- `main` builds Minecraft `1.21.11`.
-- `26.1.2` builds Minecraft `26.1.2`.
-- This update builds Minecraft `26.2`; existing branches retain the older clients.
+| Branch | Minecraft | Java | Purpose |
+|---|---|---|---|
+| [`26.2`](https://github.com/usernamelocker/chesttrackermultiplayersync/tree/26.2) | 26.2 | 25 | Default branch and primary client |
+| [`26.1.2`](https://github.com/usernamelocker/chesttrackermultiplayersync/tree/26.1.2) | 26.1.2 | 25 | Older compatible client |
+| [`1.21.11`](https://github.com/usernamelocker/chesttrackermultiplayersync/tree/1.21.11) | 1.21.11 | 21 | Older compatible client |
+| [`main`](https://github.com/usernamelocker/chesttrackermultiplayersync/tree/main) | 26.2 | 25 | Latest-code alias retained for existing Portainer stacks |
+
+The three version branches preserve their matching client builds. `26.2` is
+the GitHub default and primary development branch. `main` follows the latest
+26.2 code so existing VPS repository references keep working. Server runtime
+and deployment files are shared across all branches, not tied to a game version.
 - New releases should identify 26.2 as primary and include a 26.2 jar and
   `SHA256SUMS.txt`. Keep older compatible jars available, clearly labeled by
   Minecraft version. The build output is `mod/build/libs/chesttracker-*.jar`;
@@ -79,15 +86,16 @@ releases/            Local ignored artifacts; published assets live on GitHub.
 
 ### VPS deployment for the 26.2 client update
 
-Keep Portainer on its existing server branch (`main` in the setup guide), with
-the same compose path, environment variables, and named data volumes. Updating
-the client to 26.2 does not require a server rebuild, database migration, or
-switching the VPS to the client update branch. This port keeps protocol v2.
-The older client branches and existing release downloads remain available.
+Keep Portainer on `refs/heads/main` with its existing compose path, environment
+variables, stack name, ports, and named volumes. `26.2` becoming GitHub's
+default branch does not require changing the VPS reference. The server runtime
+and Docker files retain the previously deployed `main` behavior across all
+version branches, including the coordinate-free website read view.
 
-The 26.2 branch was based on `26.1.2`, whose server history already differs from
-`main`. Do not merge that branch into the deployed branch merely to install
-the new client. Review any future server changes separately. See
+Updating players to 26.2 requires no VPS rebuild or database migration. One
+protocol-v2 server serves 1.21.11, 26.1.2, and 26.2 simultaneously. Existing older
+jars remain available. For future server fixes, keep the shared runtime and
+deployment files synchronized across the version branches and `main`. See
 [Portainer upgrade guidance](server/PORTAINER.md#upgrading-clients-to-minecraft-262).
 
 Compatibility means shared item search, observations, tombstones, overrides,

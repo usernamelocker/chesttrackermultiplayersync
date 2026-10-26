@@ -62,7 +62,7 @@ return `QUARANTINED`, create a snapshot, and keep the containers. Confirm that
 
 ## Client automated checks (Java 25)
 
-From `mod/`, run `.\gradlew.bat build --no-daemon`. The `test` task exercises
+On `26.2`/`main`, from `mod/`, run `.\gradlew.bat build --no-daemon`. The `test` task exercises
 the real portable codec and game registry: foreign JSON preservation, component
 reset/removal, malformed components, and bounded slot allocation. Server tests
 exercise storage and HTTP compatibility; they do not replace the in-game matrix.
