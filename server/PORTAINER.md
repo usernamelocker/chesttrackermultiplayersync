@@ -16,6 +16,22 @@ This file is the operations companion.
 
 ## Update / redeploy
 
+### Upgrading clients to Minecraft 26.2
+
+This is a client update using the existing protocol v2. Keep the VPS stack on
+its current branch (`main` in the setup guide). Players install the matching
+26.2 mod jar and its required Fabric dependencies; older players keep their
+matching older jars. No server redeploy or database migration is required for
+the game-version upgrade alone.
+
+Do not change the repository branch to `codex/minecraft-26.2` to update players.
+That branch contains the client port and is based on the older `26.1.2` branch;
+its server history differs from `main`. Leave the compose path, ports, tokens,
+server identifiers, volume names, and stack name unchanged. Preserve the
+existing data and backup volumes.
+
+### Deploying a separately reviewed server update
+
 The full environment reference is [`stack.env.example`](stack.env.example),
 including `FULL_WIPE_MIN_BANK`, which protects established banks from accidental
 full-bank delete pushes. Partial deletes are not blocked.

@@ -61,6 +61,7 @@ releases/            Local ignored artifacts; published assets live on GitHub.
 
 ## Branches and releases
 
+- `codex/minecraft-26.2` contains the primary Minecraft `26.2` client update.
 - `main` builds Minecraft `1.21.11`.
 - `26.1.2` builds Minecraft `26.1.2`.
 - This update builds Minecraft `26.2`; existing branches retain the older clients.
@@ -72,9 +73,22 @@ releases/            Local ignored artifacts; published assets live on GitHub.
   [TESTING.md](docs/TESTING.md#262-port-validation-2026-10-27).
 - Required external mods: Fabric API and YACL for **26.2**. Where Is It and
   Searchables are bundled. Optional integrations need their own 26.2 releases.
-- Redeploy the server stack whenever files under `server/` change. Client jars
-  and server code are released together for compatibility, but server-only
+- Redeploy the server stack when server runtime or deployment files change;
+  documentation and test changes alone do not need a redeploy. Server-only
   fixes do not require new client logic.
+
+### VPS deployment for the 26.2 client update
+
+Keep Portainer on its existing server branch (`main` in the setup guide), with
+the same compose path, environment variables, and named data volumes. Updating
+the client to 26.2 does not require a server rebuild, database migration, or
+switching the VPS to the client update branch. This port keeps protocol v2.
+The older client branches and existing release downloads remain available.
+
+The 26.2 branch was based on `26.1.2`, whose server history already differs from
+`main`. Do not merge that branch into the deployed branch merely to install
+the new client. Review any future server changes separately. See
+[Portainer upgrade guidance](server/PORTAINER.md#upgrading-clients-to-minecraft-262).
 
 Compatibility means shared item search, observations, tombstones, overrides,
 and wipe generations across releases. A client can only display items and
