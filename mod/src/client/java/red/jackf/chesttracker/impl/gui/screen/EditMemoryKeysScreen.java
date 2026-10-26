@@ -54,7 +54,7 @@ public class EditMemoryKeysScreen extends BaseUtilScreen {
 
     @Override
     public void onClose() {
-        Minecraft.getInstance().setScreen(parent);
+        Minecraft.getInstance().gui.setScreen(parent);
     }
 
     @Override
@@ -106,7 +106,7 @@ public class EditMemoryKeysScreen extends BaseUtilScreen {
                             bankView.metadata().getVisualSettings().getOrCreateIcon(key),
                             x,
                             y,
-                            button -> Minecraft.getInstance().setScreen(new SelectorScreen<>(
+                            button -> Minecraft.getInstance().gui.setScreen(new SelectorScreen<>(
                                     translatable("chesttracker.gui.editMemoryKeys.setIcon"),
                                     this,
                                     GuiConstants.DEFAULT_ICON_ORDER,

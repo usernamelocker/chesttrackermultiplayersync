@@ -61,10 +61,10 @@ public class ChestTrackerConfigScreenBuilder {
     }
 
     private static void refreshConfigScreen(Screen parent) {
-        if (Minecraft.getInstance().screen instanceof YACLScreen yacl1) {
+        if (Minecraft.getInstance().gui.screen() instanceof YACLScreen yacl1) {
             var currentIndex = yacl1.tabNavigationBar.currentTabIndex();
-            Minecraft.getInstance().setScreen(build(parent));
-            if (Minecraft.getInstance().screen instanceof YACLScreen yacl2)
+            Minecraft.getInstance().gui.setScreen(build(parent));
+            if (Minecraft.getInstance().gui.screen() instanceof YACLScreen yacl2)
                 yacl2.tabNavigationBar.selectTab(currentIndex, false);
         }
     }
@@ -327,7 +327,7 @@ public class ChestTrackerConfigScreenBuilder {
                         .name(translatable("chesttracker.config.whereisit"))
                         .description(OptionDescription.of(translatable("chesttracker.config.whereisit.description")))
                         .text(translatable("chesttracker.gui.open"))
-                        .action((yaclScreen, button) -> Minecraft.getInstance().setScreen(WhereIsItConfigScreenBuilder.build(yaclScreen))).build())
+                        .action((yaclScreen, button) -> Minecraft.getInstance().gui.setScreen(WhereIsItConfigScreenBuilder.build(yaclScreen))).build())
                 .build();
     }
 
@@ -361,10 +361,10 @@ public class ChestTrackerConfigScreenBuilder {
                         .text(translatable("chesttracker.config.open"))
                         .action(((screen, option) -> {
                             Runnable lambda = () -> {
-                                Minecraft.getInstance().setScreen(screen);
+                                Minecraft.getInstance().gui.setScreen(screen);
                                 refreshConfigScreen(parent);
                             };
-                            Minecraft.getInstance().setScreen(new MemoryBankManagerScreen(lambda, lambda));
+                            Minecraft.getInstance().gui.setScreen(new MemoryBankManagerScreen(lambda, lambda));
                         }))
                         .build());*/
 
@@ -594,7 +594,7 @@ public class ChestTrackerConfigScreenBuilder {
                     }).build());
         }
 
-        Minecraft.getInstance().setScreen(YetAnotherConfigLib.createBuilder()
+        Minecraft.getInstance().gui.setScreen(YetAnotherConfigLib.createBuilder()
                 .title(translatable("chesttracker.config.inventoryButton.manageCustom"))
                 .category(category.build())
                 .build()

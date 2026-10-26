@@ -69,7 +69,7 @@ public class ChestTracker implements ClientModInitializer {
     );
 
     public static void openInGame(Minecraft client, @Nullable Screen parent) {
-        client.setScreen(new ChestTrackerScreen(parent));
+        client.gui.setScreen(new ChestTrackerScreen(parent));
     }
 
     public static void skipProviderForNextGuiClose() {
@@ -90,7 +90,7 @@ public class ChestTracker implements ClientModInitializer {
 
         ClientTickEvents.START_CLIENT_TICK.register(client -> {
             // opening Chest Tracker GUI with no screen open
-            if (client.screen == null && client.getOverlay() == null)
+            if (client.gui.screen() == null && client.gui.overlay() == null)
                 while (OPEN_GUI.consumeClick())
                     openInGame(client, null);
         });

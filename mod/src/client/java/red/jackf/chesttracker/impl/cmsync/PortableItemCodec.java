@@ -24,6 +24,8 @@ import java.util.Map;
 public final class PortableItemCodec {
     public static final String FORMAT = "cmsync.item";
     public static final int VERSION = 1;
+    // Bound allocations from remote input, including envelopes from future peers.
+    public static final int MAX_SLOTS = 4096;
 
     private PortableItemCodec() {
     }
@@ -58,7 +60,9 @@ public final class PortableItemCodec {
                         // An older client cannot have an entry for a foreign type in
                         // its ItemStack patch. Preserve such entries until a client
                         // that understands them can decode them.
-                        if (!components.has(e.getKey())) components.add(e.getKey(), e.getValue().deepCopy());
+                        if (!components.has(e.getKey()) && !canDecodeComponent(e.getKey(), e.getValue(), ops)) {
+                            components.add(e.getKey(), e.getValue().deepCopy());
+                        }
                     }
                 }
             }
@@ -89,7 +93,8 @@ public final class PortableItemCodec {
             if (!element.isJsonObject()) continue;
             JsonObject item = element.getAsJsonObject();
             try {
-                int slot = Math.max(0, item.get("slot").getAsInt());
+                int slot = item.get("slot").getAsBigDecimal().intValueExact();
+                if (slot < 0 || slot >= MAX_SLOTS) continue;
                 while (stacks.size() <= slot) stacks.add(ItemStack.EMPTY);
                 Identifier id = Identifier.parse(item.get("id").getAsString());
                 ItemStack stack = BuiltInRegistries.ITEM.getOptional(id).map(value ->
@@ -99,19 +104,26 @@ public final class PortableItemCodec {
                 DataComponentPatch.Builder patch = DataComponentPatch.builder();
                 if (item.has("components") && item.get("components").isJsonObject()) {
                     for (var e : item.getAsJsonObject("components").entrySet()) {
-                        Identifier componentId = Identifier.parse(e.getKey());
-                        DataComponentType<?> type = BuiltInRegistries.DATA_COMPONENT_TYPE
-                                .getOptional(componentId).orElse(null);
-                        if (type == null) continue; // retained in the shadow envelope
-                        JsonObject entry = e.getValue().isJsonObject()
-                                ? e.getValue().getAsJsonObject() : null;
-                        if (entry == null) continue;
-                        String op = optString(entry, "op");
-                        if ("remove".equals(op)) {
-                            removeComponent(patch, type);
-                        } else if ("set".equals(op) && entry.has("value")) {
-                            DataResult<?> decoded = type.codec().parse(ops, entry.get("value"));
-                            if (decoded.result().isPresent()) setComponent(patch, type, decoded.result().get());
+                        try {
+                            Identifier componentId = Identifier.parse(e.getKey());
+                            DataComponentType<?> type = BuiltInRegistries.DATA_COMPONENT_TYPE
+                                    .getOptional(componentId).orElse(null);
+                            if (type == null) continue; // retained in the shadow envelope
+                            JsonObject entry = e.getValue().isJsonObject()
+                                    ? e.getValue().getAsJsonObject() : null;
+                            if (entry == null) continue;
+                            String op = optString(entry, "op");
+                            if ("remove".equals(op)) {
+                                removeComponent(patch, type);
+                            } else if ("set".equals(op) && entry.has("value")) {
+                                DataResult<?> decoded = type.codec().parse(ops, entry.get("value"));
+                                if (decoded.error().isEmpty() && decoded.result().isPresent()) {
+                                    setComponent(patch, type, decoded.result().get());
+                                }
+                            }
+                        } catch (RuntimeException ignored) {
+                            // One foreign or malformed component must not hide the item.
+                            // Its original JSON remains in the shadow for a capable peer.
                         }
                     }
                 }
@@ -158,6 +170,20 @@ public final class PortableItemCodec {
         return components;
     }
 
+    private static boolean canDecodeComponent(String id, JsonElement value, DynamicOps<JsonElement> ops) {
+        try {
+            DataComponentType<?> type = BuiltInRegistries.DATA_COMPONENT_TYPE
+                    .getOptional(Identifier.parse(id)).orElse(null);
+            if (type == null || !value.isJsonObject()) return false;
+            JsonObject entry = value.getAsJsonObject();
+            if ("remove".equals(optString(entry, "op"))) return true;
+            return "set".equals(optString(entry, "op")) && entry.has("value")
+                    && type.codec() != null && type.codec().parse(ops, entry.get("value")).error().isEmpty();
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
     @SuppressWarnings({"unchecked", "rawtypes"})
     private static DataResult<JsonElement> encodeComponent(DataComponentType type, Object value,
                                                             DynamicOps<JsonElement> ops) {
@@ -181,7 +207,8 @@ public final class PortableItemCodec {
             if (!element.isJsonObject()) continue;
             try {
                 JsonObject item = element.getAsJsonObject();
-                result.put(item.get("slot").getAsInt(), item);
+                int slot = item.get("slot").getAsBigDecimal().intValueExact();
+                if (slot >= 0 && slot < MAX_SLOTS) result.put(slot, item);
             } catch (RuntimeException ignored) {
             }
         }

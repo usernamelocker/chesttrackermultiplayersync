@@ -163,7 +163,7 @@ public final class Memory {
      * @return A position in the world regarded as the 'center'.
      */
     public Vec3 getCenterPosition() {
-        return Misc.getAverageOffsetFrom(this.position, this.otherPositions()).add(this.position.getCenter());
+        return Misc.getAverageOffsetFrom(this.position, this.otherPositions()).add(Vec3.atCenterOf(position));
     }
 
     /**

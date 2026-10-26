@@ -10,7 +10,7 @@ import io.github.klahap.dotenv.DotEnvBuilder.Companion.dotEnv
 
 plugins {
     id("maven-publish")
-    id("net.fabricmc.fabric-loom") version "1.15-SNAPSHOT"
+    id("net.fabricmc.fabric-loom") version "1.17.21"
     id("com.github.breadmoirai.github-release") version "2.5.2"
     id("org.ajoberstar.grgit") version "5.3.0"
     id("io.github.klahap.dotenv") version "1.1.3"
@@ -112,31 +112,6 @@ repositories {
         }
     }
 
-    // JackFredLib
-    maven {
-        name = "JackFredLib-GitHub"
-        url = uri("https://maven.pkg.github.com/ponuing/JackFredLib")
-        credentials {
-            username = dotenv["GITHUB_ACTOR"]
-            password = dotenv["GITHUB_TOKEN"]
-        }
-        content {
-            includeGroupAndSubgroups("red.jackf")
-        }
-    }
-
-    // Where Is It
-    maven {
-        name = "WhereIsIt-GitHub"
-        url = uri("https://maven.pkg.github.com/ponuing/WhereIsIt")
-        credentials {
-            username = dotenv["GITHUB_ACTOR"]
-            password = dotenv["GITHUB_TOKEN"]
-        }
-        content {
-            includeGroup("red.jackf")
-        }
-    }
     // Shulker Box Tooltip
     maven {
         name = "MisterPeModder"
@@ -167,6 +142,7 @@ repositories {
 
 java {
     withSourcesJar()
+    toolchain.languageVersion.set(JavaLanguageVersion.of(25))
 }
 
 loom {
@@ -181,13 +157,40 @@ loom {
     log4jConfigs.from(file("log4j2.xml"))
 
     runConfigs.configureEach {
-        this.programArgs.addAll("--username JackFred".split(" "))
+        programArgs("--username", "CMSyncDev")
+        runDir(providers.gradleProperty("run_directory").getOrElse("run"))
     }
 
     accessWidenerPath.set(file("src/client/resources/chesttracker.accesswidener"))
 }
 
+// The public Where Is It distribution already embeds JackFredLib. Expose that
+// exact bundled library to the compiler/dev runtime without GitHub credentials.
+val whereIsItBundle by configurations.creating {
+    isTransitive = false
+}
+val extractJackFredLib by tasks.registering(Sync::class) {
+    from({ zipTree(whereIsItBundle.singleFile) }) {
+        include("META-INF/jars/jackfredlib-*.jar")
+        eachFile { path = name }
+        includeEmptyDirs = false
+    }
+    into(layout.buildDirectory.dir("bundled-libraries"))
+}
+val extractJackFredLibModules by tasks.registering(Sync::class) {
+    dependsOn(extractJackFredLib)
+    from({ fileTree(extractJackFredLib.get().destinationDir).files.map { zipTree(it) } }) {
+        include("META-INF/jars/*.jar")
+        eachFile { path = name }
+        includeEmptyDirs = false
+    }
+    into(layout.buildDirectory.dir("bundled-library-modules"))
+}
+
 dependencies {
+    testImplementation(platform("org.junit:junit-bom:5.14.2"))
+    testImplementation("org.junit.jupiter:junit-jupiter")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     // To change the versions see the gradle.properties file
     minecraft("com.mojang:minecraft:${properties["minecraft_version"]}")
     implementation("net.fabricmc:fabric-loader:${properties["loader_version"]}")
@@ -195,8 +198,13 @@ dependencies {
     implementation("net.fabricmc.fabric-api:fabric-api:${properties["fabric-api_version"]}")
 
     // Where is it
-    implementation("red.jackf:whereisit:${properties["where-is-it_version"]}")
-    include("red.jackf:whereisit:${properties["where-is-it_version"]}")
+    val whereIsIt = "maven.modrinth:where-is-it-port:${properties["where-is-it_version"]}"
+    implementation(whereIsIt)
+    include(whereIsIt)
+    whereIsItBundle(whereIsIt)
+    implementation(files(fileTree(layout.buildDirectory.dir("bundled-library-modules")) {
+        include("*.jar")
+    }).builtBy(extractJackFredLibModules))
 
     // Config
     implementation("dev.isxander:yet-another-config-lib:${properties["yacl_version"]}") {
@@ -225,7 +233,7 @@ dependencies {
     localRuntime("com.terraformersmc:modmenu:${properties["modmenu_version"]}")
 
     // Shulker Box Tooltip
-    compileOnly("com.misterpemodder:shulkerboxtooltip-fabric:${properties["shulkerboxtooltip_version"]}")
+    compileOnly("maven.modrinth:shulkerboxtooltip:${properties["shulkerboxtooltip_version"]}")
 
     //runtimeOnly("com.misterpemodder:shulkerboxtooltip-fabric:${properties["shulkerboxtooltip_version"]}")
     //runtimeOnly("me.shedaniel.cloth:cloth-config-fabric:${properties["clothconfig_version"]}")
@@ -243,10 +251,20 @@ dependencies {
     // Litematica
     //modCompileOnly("maven.modrinth:litematica:${properties["litematica_version"]}")
     //modCompileOnly("maven.modrinth:malilib:${properties["malilib_version"]}")
-    compileOnly(fileTree("libs"))
+    compileOnly("maven.modrinth:litematica:${properties["litematica_version"]}")
+    compileOnly("maven.modrinth:malilib:${properties["malilib_version"]}")
 
     //runtimeOnly("maven.modrinth:litematica:${properties["litematica_version"]}")
     //runtimeOnly("maven.modrinth:malilib:${properties["malilib_version"]}")
+}
+
+sourceSets.test {
+    compileClasspath += sourceSets["client"].output + sourceSets["client"].compileClasspath
+    runtimeClasspath += sourceSets["client"].output + sourceSets["client"].runtimeClasspath
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
 
 tasks.withType<ProcessResources>().configureEach {
@@ -261,7 +279,7 @@ tasks.withType<JavaCompile>().configureEach {
 
 tasks.jar {
     from("LICENSE") {
-        rename { "${it}_${properties["archivesBaseName"]}"}
+        rename { "${it}_${base.archivesName.get()}" }
     }
 }
 
@@ -302,7 +320,7 @@ publishing {
         if (canPublish) {
             maven {
                 name = "GitHubPackages"
-                url = uri("https://maven.pkg.github.com/ponuing/ChestTracker")
+                url = uri("https://maven.pkg.github.com/usernamelocker/chesttrackermultiplayersync")
                 credentials {
                     username = dotenv["GITHUB_ACTOR"]
                     password = dotenv["GITHUB_TOKEN"]
@@ -404,12 +422,12 @@ if (canPublish) {
                 else -> ReleaseType.ALPHA
             })
             modLoaders.add("fabric")
-            modLoaders.add("quilt")
             file.set(tasks.named<Jar>("jar").get().archiveFile)
 
-            if (System.getenv().containsKey("CURSEFORGE_TOKEN") || dryRun.get()) {
+            if ((System.getenv().containsKey("CURSEFORGE_TOKEN") || dryRun.get())
+                && providers.gradleProperty("curseforge_project_id").isPresent) {
                 curseforge {
-                    projectId.set("1368871")
+                    projectId.set(providers.gradleProperty("curseforge_project_id"))
                     accessToken.set(System.getenv("CURSEFORGE_TOKEN"))
                     properties["game_versions_curse"]!!.toString().split(",").forEach {
                         minecraftVersions.add(it)
@@ -445,10 +463,11 @@ if (canPublish) {
                 }
             }
 
-            if (System.getenv().containsKey("MODRINTH_TOKEN") || dryRun.get()) {
+            if ((System.getenv().containsKey("MODRINTH_TOKEN") || dryRun.get())
+                && providers.gradleProperty("modrinth_project_id").isPresent) {
                 modrinth {
                     accessToken.set(System.getenv("MODRINTH_TOKEN"))
-                    projectId.set("VC2NohMN")
+                    projectId.set(providers.gradleProperty("modrinth_project_id"))
                     properties["game_versions_mr"]!!.toString().split(",").forEach {
                         minecraftVersions.add(it)
                     }

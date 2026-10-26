@@ -243,7 +243,7 @@ public class EditMemoryBankScreen extends BaseUtilScreen {
     }
 
     private void openEditMemoryKeys(Button ignored) {
-        Minecraft.getInstance().setScreen(new EditMemoryKeysScreen(this, memoryBank));
+        Minecraft.getInstance().gui.setScreen(new EditMemoryKeysScreen(this, memoryBank));
     }
 
     private void markSettingsCustom() {
@@ -586,7 +586,7 @@ public class EditMemoryBankScreen extends BaseUtilScreen {
         Set<BlockPos> within = new HashSet<>();
         Set<BlockPos> outside = new HashSet<>();
         for (BlockPos pos : currentMemories.getRenderableMemories().keySet()) {
-            if (origin.distanceToSqr(pos.getCenter()) < squareRange) {
+            if (origin.distanceToSqr(Vec3.atCenterOf(pos)) < squareRange) {
                 within.add(pos);
             } else {
                 outside.add(pos);
@@ -1109,7 +1109,7 @@ public class EditMemoryBankScreen extends BaseUtilScreen {
 
     @Override
     public void onClose() {
-        Minecraft.getInstance().setScreen(parent);
+        Minecraft.getInstance().gui.setScreen(parent);
     }
 
     @FunctionalInterface

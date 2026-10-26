@@ -48,14 +48,14 @@ public class RenameButton extends SecondaryButton {
 
         ChestTracker.skipProviderForNextGuiClose();
 
-        Minecraft.getInstance().setScreen(new RenameInputScreen(memoryLocation,
+        Minecraft.getInstance().gui.setScreen(new RenameInputScreen(memoryLocation,
                 current,
                 preview,
                 inGameName,
                 opt -> {
             opt.ifPresent(newName -> this.bank.setNameOverride(memoryLocation.memoryKey(), memoryLocation.position(), newName));
             InventoryButton.setRestoreLocation(parent, memoryLocation);
-            Minecraft.getInstance().setScreen(parent);
+            Minecraft.getInstance().gui.setScreen(parent);
         }));
     }
 }

@@ -99,12 +99,12 @@ interface Skyblock {
 
     private static boolean isMenuButton(ItemStack stack) {
         var name = stack.getHoverName().getString();
-        return (stack.is(Items.BLACK_STAINED_GLASS_PANE) && name.isBlank())
+        return (stack.is(Items.STAINED_GLASS_PANE.black()) && name.isBlank())
                 || (stack.is(Items.PLAYER_HEAD) && name.contains("Page"))
                 || (stack.is(Items.ARROW) && name.contains("Back"))
                 || (stack.is(Items.CAULDRON) && name.contains("Pickup"))
                 || (stack.is(Items.CHEST) && name.contains("Insert"))
-                || (stack.is(Items.GRAY_DYE))
+                || (stack.is(Items.DYE.gray()))
                 || (stack.is(Items.ENDER_EYE) && name.contains("Filter"))
                 || (stack.is(Items.BARRIER) && name.contains("Close"));
     }

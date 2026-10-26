@@ -115,6 +115,6 @@ public class SelectorScreen<T> extends Screen {
     @Override
     public void onClose() {
         consumer.accept(this.answer);
-        Minecraft.getInstance().setScreen(parent);
+        Minecraft.getInstance().gui.setScreen(parent);
     }
 }

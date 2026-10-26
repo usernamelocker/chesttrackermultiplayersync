@@ -60,7 +60,7 @@ public class MemoryBankManagerScreen extends BaseUtilScreen {
      * @param afterBankLoaded - Runnable to run after selection of a new memory bank
      */
     public MemoryBankManagerScreen(Supplier<@Nullable Screen> onRemoveScreen, Runnable afterBankLoaded) {
-        this(() -> Minecraft.getInstance().setScreen(onRemoveScreen.get()), afterBankLoaded);
+        this(() -> Minecraft.getInstance().gui.setScreen(onRemoveScreen.get()), afterBankLoaded);
     }
 
     public MemoryBankManagerScreen(@Nullable Screen parent, Runnable afterBankLoaded) {
@@ -156,11 +156,11 @@ public class MemoryBankManagerScreen extends BaseUtilScreen {
     }
 
     private void openCreateScreen(Runnable afterBankLoaded) {
-        Minecraft.getInstance().setScreen(new CreateMemoryBankScreen(this, afterBankLoaded));
+        Minecraft.getInstance().gui.setScreen(new CreateMemoryBankScreen(this, afterBankLoaded));
     }
 
     private void openEditScreen(Runnable afterBankLoaded, @NotNull String bankId) {
-        Minecraft.getInstance().setScreen(new EditMemoryBankScreen(this, afterBankLoaded, bankId));
+        Minecraft.getInstance().gui.setScreen(new EditMemoryBankScreen(this, afterBankLoaded, bankId));
     }
 
     @Override
