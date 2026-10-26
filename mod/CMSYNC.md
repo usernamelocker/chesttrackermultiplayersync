@@ -1,82 +1,62 @@
-# CMSync mod — build & use (26.1.2 branch)
+# CMSync mod — Minecraft 26.1.2
 
-This branch (`26.1.2`) is ponuing/ChestTracker `26.1.2` with the CMSync
-multiplayer overlay applied. The `main` branch is the same overlay on
-QMSync `1.21.11` — see [Branches](#branches) for the (small) differences.
-The server in repo-root `server/` serves all versions.
+This branch builds the older Minecraft **26.1.2** Fabric client with **Java 25**.
+The primary client and GitHub default branch are `26.2`; `main` follows that
+latest code and remains the Portainer deployment reference.
 
-## Our changes vs upstream
+| Branch | Minecraft | Java | Role |
+|---|---|---|---|
+| `26.2` | 26.2 | 25 | Default branch and primary client |
+| `26.1.2` | 26.1.2 | 25 | Older compatible client |
+| `1.21.11` | 1.21.11 | 21 | Older compatible client |
+| `main` | 26.2 | 25 | Latest-code alias for the existing VPS deployment |
 
-`mod/src/client/java/red/jackf/chesttracker/`:
+## Shared server and compatibility
 
-* `impl/cmsync/` (7 files) — the sync client:
-  `CMSyncSettings` (per-bank sidecar + admin token), `CMSyncHttp` (protocol v2,
-  pinned HTTP/1.1, token header), `CMSyncQueue` (single background lane, coalesced),
-  `CMSyncManager` (snapshot → push → pull-merge, delete propagation, wipe generations),
-  `CMSyncCommand` (`/cmsync status|stop|wipealldata`), `ItemNormalizer`
-  (names+counts view + hashes), `CMSyncLog` (`cmsync.log` file logging).
-* `impl/memory/EnderChestKeys.java` — per-player ender chest keys
-  (`ender_chest/<uuid>` etc.), one-time migration of legacy shared data, legacy-key hiding.
-* `impl/gui/screen/ChestTrackerScreen.java` — ender chest profiles (own head icon first,
-  per-player buttons, hover names).
-* `impl/gui/screen/EditMemoryBankScreen.java` — **Sync** tab (URL + masked token +
-  Connect + Pause/Resume + Stop) and **CM Settings** tab (interval, ender chest,
-  container names, chat notifications, admin token).
-* `mixins/compat/litematica/GuiMaterialListMixin.java` — version-proof Search button
-  (anchored at `initGui` TAIL, no fragile field shadows).
-* `MemoryBankAccessImpl` — runs the ender chest migration on bank load.
+All branches contain the same server runtime and Docker configuration. One
+protocol-v2 server serves all supported game versions. Keep Portainer on
+`refs/heads/main`; keep its stack name, compose path, ports, environment settings,
+and named volumes unchanged. A client upgrade does not require a database
+migration or VPS rebuild. Apply future shared server fixes to every branch.
 
-## In-game
+Install the jar and Fabric API/YACL releases that match your Minecraft version.
+The game binaries are not interchangeable. Portable `cmsync.item` v1 envelopes
+preserve component data understood by a peer; unknown items cannot be displayed
+by older games. Existing release binaries retain their original capabilities.
+See the [protocol](../protocol/PROTOCOL.md),
+[item format](../protocol/normalization.md), and
+[compatibility checks](../docs/TESTING.md).
 
-The server may return `QUARANTINED` for a suspected exact full-bank delete push;
-existing clients keep their local state and report the held wipe. The explicit
-`/cmsync wipealldata` command remains allowed.
+## Build this older client
 
-Memory Bank menu (`` ` `` key → pencil icon):
-
-* **Sync tab** — server URL (`https://host:port` or `host:port`), shared token
-  (masked, stored on this PC only), Connect / Pause / Resume / Stop + state label.
-* **CM Settings tab** — sync interval (2–3600s), Sync ender chest, Sync container
-  names, Chat notifications, Admin token (for `/cmsync wipealldata` only).
-* `/cmsync status` — connection, server/bank ids, last sync, last detail, local counts.
-* `/cmsync stop` — disconnect + forget URL/token. `/cmsync wipealldata` (+ `confirm`) —
-  two-step shared-database wipe (needs the admin token), snapshots kept as backup.
-* Every cycle, handshake, wipe, stall and transport error (with its message) is
-  appended to `<game>/chesttracker/cmsync.log` (capped ~512KB, rotated).
-
-Requires Fabric API + YACL in `mods/`.
-
-## Build (this branch)
-
-Prereqs: **Java 25** (set `JAVA_HOME` to a JDK 25 — building on plain Java 21 fails
-with `release version 25 not supported`), plus a GitHub classic token with
-`read:packages` (JackFredLib/WhereIsIt come from GitHub Packages).
+Set `JAVA_HOME` to a JDK 25. This older build still resolves
+JackFredLib/Where Is It through GitHub Packages and requires a GitHub token
+with `read:packages`. The public-dependency build improvements are on `26.2`.
 
 ```powershell
 cd mod
-copy .env.example .env   # fill GITHUB_ACTOR (your username) + GITHUB_TOKEN
-.\gradlew.bat build -x test
-# jar: mod\build\libs\chesttracker-*.jar  (name contains the commit hash)
+copy .env.example .env   # fill GITHUB_ACTOR and GITHUB_TOKEN locally
+.\gradlew.bat build --no-daemon
 ```
 
-`.env` is gitignored — never commit it. No unit tests in the mod (`check` only);
-server tests live in `server/` (`pytest test_api.py test_server.py`).
+Do not commit `.env`. Output jars are under `mod/build/libs/`; install the jar
+without `-sources`. The new game-registry codec tests are on `26.2`/`main`;
+server checks and the manual multiplayer matrix are in
+[TESTING.md](../docs/TESTING.md).
 
-## Branches
+## In-game use
 
-| | `main` (this file) | `26.1.2` |
-|---|---|---|
-| Base | QMSync `1.21.11` | ponuing/ChestTracker `26.1.2` |
-| Java to build | 21 (default toolchain) | **25** (`JAVA_HOME` → a JDK 25, else `release version 25 not supported`) |
-| `sendChat` | `player.displayClientMessage(msg, false)` | `player.sendSystemMessage(msg)` |
-| Commands registration | `ClientCommandManager` | `ClientCommands` |
-| Litematica mixin anchor | `initGui` TAIL (same shape both branches) | `initGui` TAIL (same shape both branches) |
-| Releases | `chesttracker-*-mc1.21.11.jar` | `chesttracker-*-mc26.1.2.jar` |
+Open the Memory Bank menu with the grave key, then configure the **Sync** tab
+with the shared server URL and token. **CM Settings** contains the sync interval,
+ender-chest and name options, notifications, and the separate admin token.
+`/cmsync status` reports sync state. `/cmsync stop` disconnects and forgets the
+connection. `/cmsync wipealldata` is an intentional, confirmed admin wipe;
+ordinary suspected full-bank deletes remain quarantined by the shared server.
 
-Porting rule: keep the overlay logic identical; only adapt call sites the compiler
-rejects. Protocol (`protocol/PROTOCOL.md`) is version-frozen at v2.
+See the [repository README](../README.md),
+[Portainer guide](../server/PORTAINER.md), and
+[upstream feature overview](README.md).
 
 ## License
 
-LGPL-3.0 (see `LICENSE`) — upstream terms preserved. Keep this mod source public
-if you distribute built jars.
+The upstream LGPL-3.0 terms are preserved; see [LICENSE](LICENSE).

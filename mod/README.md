@@ -3,6 +3,7 @@
 This file documents the upstream Chest Tracker features. CMSync synchronization,
 server setup, release artifacts, and cross-version behavior are documented in the
 repository [README](../README.md) and [CMSYNC.md](CMSYNC.md).
+The primary CMSync build targets Minecraft 26.2 with Fabric and Java 25.
 ---
 ## **Unofficial port** for new versions Minecraft, as the original author hasn't updated the mod for a long time. [Original Mod](https://modrinth.com/mod/chest-tracker).
 ---
