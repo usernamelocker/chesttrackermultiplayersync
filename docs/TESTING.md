@@ -4,7 +4,7 @@
 
 ```powershell
 cd server
-   python -m pytest test_api.py test_server.py
+python -m pytest test_api.py test_server.py test_portable_format.py test_cross_version.py
 ```
 
 Covers: LWW newer-wins across `mcVersion`, stale ignored, shared memory/tombstone
@@ -34,7 +34,7 @@ python smoke.py http://VPS-IP:7000 YOURTOKEN
 9. Admin test: put `ADMIN_TOKEN` in CM Settings → `/cmsync wipealldata` + `confirm` →
    server zeroed, all clients cleared (generation bump), snapshot kept.
 
-## Cross-version (1.21.11 + 26.1.2)
+## Cross-version (1.21.11 + 26.1.2 + 26.2)
 
 Also test a delete-only push covering every stored container: the server must
 return `QUARANTINED`, create a snapshot, and keep the containers. Confirm that
@@ -44,9 +44,49 @@ return `QUARANTINED`, create a snapshot, and keep the containers. Confirm that
 * Expect: counts/search match by `id`; native data restores when the receiving
   version can decode it, while the portable envelope supplies known components
   across versions.
-* Test a nested container/bundle component created on 26.1.2, edit the item on
-  1.21.11, and verify the unknown component survives when it returns to 26.1.2.
+* Test each pair of versions in both directions. Use existing older release jars
+  as well as the new 26.2 build, against the same server and bank.
+* Test a nested container/bundle component created on 26.2, edit the item on
+  1.21.11 and 26.1.2, and verify the unknown component survives its return to 26.2
+  when the older release supports portable shadows.
   Unknown newer ids/components must not crash the older client.
+* Reset a known component to its default and confirm that its old shadow value
+  does not return. Explicit removals must also survive a push/pull cycle.
+* Test the Sync and CM Settings tabs, ender profiles, and every screen's back
+  button. Check names above chests and search highlights on OpenGL and Vulkan.
+* Repeat with optional 26.2 mods: Mod Menu, Jade, WTHIT, Shulker Box Tooltip,
+  and Litematica + MaLiLib. Open the material list and use Search Missing.
+* Disconnect during a push, reconnect, and check that unacknowledged changes
+  retry. Restart an offline older client after an admin wipe; stale state must
+  not repopulate the bank.
+
+## Client automated checks (Java 25)
+
+From `mod/`, run `.\gradlew.bat build --no-daemon`. The `test` task exercises
+the real portable codec and game registry: foreign JSON preservation, component
+reset/removal, malformed components, and bounded slot allocation. Server tests
+exercise storage and HTTP compatibility; they do not replace the in-game matrix.
+
+## 26.2 port validation (2026-10-27)
+
+- `gradlew.bat build --no-daemon`: client compilation, six portable-codec tests,
+  and access-widener validation passed on Java 25.
+- Server regression suite: 21 tests passed, including all nine writer/reader
+  combinations of 1.21.11, 26.1.2, and 26.2 through protocol-v2 HTTP endpoints.
+- Local Markdown file links resolve, and `git diff --check` passes.
+- The isolated 26.2 development client initialized OpenGL, resources, CMSync,
+  and the Jade integration. Offline development accounts report expected
+  Minecraft/Realms authentication errors; those do not indicate a sync failure.
+- An additional startup pass completed resource initialization with Litematica
+  0.28.8, MaLiLib 0.29.6, Shulker Box Tooltip 5.4.3, WTHIT 20.0.0, Bad Packets
+  0.12.2, Jade 26.2.11, and Mod Menu 20.0.3 installed, without a mixin crash.
+- Real multiplayer sessions, visual screen behavior, world-label rendering,
+  Vulkan, and round trips through existing older jars still require the manual
+  matrix above. The Windows inspection helper was unavailable during this run,
+  so startup evidence comes from game logs, not visual verification.
+
+These checks establish the tested behavior; they do not guarantee that every
+older mod release or optional-mod combination is bug-free.
 
 ## When something fails
 

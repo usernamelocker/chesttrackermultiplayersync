@@ -2,7 +2,9 @@
 
 CMSync v2 extends the original QMSync handshake and full-snapshot API with
 authenticated delta push/pull synchronization. The supported client versions
-are Minecraft `1.21.11` and `26.1.2`.
+are Minecraft `26.2` (primary), `26.1.2`, and `1.21.11`. The 26.2 port keeps
+protocol v2 and the portable envelope version unchanged; no server migration
+is required for the game version alone.
 
 The server stores opaque item data and does not interpret Minecraft codecs. The
 cross-version item format is specified separately in

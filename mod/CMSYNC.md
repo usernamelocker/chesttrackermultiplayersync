@@ -1,20 +1,22 @@
-# CMSync mod — build & use (26.1.2 branch)
+# CMSync mod — build & use (Minecraft 26.2)
 
-This branch (`26.1.2`) is ponuing/ChestTracker `26.1.2` with the CMSync
-multiplayer overlay applied. The `main` branch is the same overlay on
-QMSync `1.21.11` — see [Branches](#branches) for the (small) differences.
-The server in repo-root `server/` serves all versions.
+The primary client now targets Minecraft **26.2**, using ponuing/ChestTracker's
+26.2 game API migration with CMSync preserved. Existing `main` (1.21.11) and
+`26.1.2` releases remain compatible with the shared server. See
+[Branches](#branches) for build targets. The server in repo-root `server/`
+serves all three versions through protocol v2.
 
 ## Our changes vs upstream
 
 `mod/src/client/java/red/jackf/chesttracker/`:
 
-* `impl/cmsync/` (7 files) — the sync client:
+* `impl/cmsync/` — the sync client:
   `CMSyncSettings` (per-bank sidecar + admin token), `CMSyncHttp` (protocol v2,
   pinned HTTP/1.1, token header), `CMSyncQueue` (single background lane, coalesced),
   `CMSyncManager` (snapshot → push → pull-merge, delete propagation, wipe generations),
   `CMSyncCommand` (`/cmsync status|stop|wipealldata`), `ItemNormalizer`
-  (names+counts view + hashes), `CMSyncLog` (`cmsync.log` file logging).
+  (names+counts view + hashes), `PortableItemCodec` (component envelopes and
+  foreign data preservation), `CMSyncLog` (`cmsync.log` file logging).
 * `impl/memory/EnderChestKeys.java` — per-player ender chest keys
   (`ender_chest/<uuid>` etc.), one-time migration of legacy shared data, legacy-key hiding.
 * `impl/gui/screen/ChestTrackerScreen.java` — ender chest profiles (own head icon first,
@@ -44,34 +46,49 @@ Memory Bank menu (`` ` `` key → pencil icon):
 * Every cycle, handshake, wipe, stall and transport error (with its message) is
   appended to `<game>/chesttracker/cmsync.log` (capped ~512KB, rotated).
 
-Requires Fabric API + YACL in `mods/`.
+Requires Java 25, Fabric Loader 0.19.5 or newer, and 26.2 releases of Fabric API
+and YACL in `mods/`. The jar declares `~26.2`; use the matching older jar on
+1.21.11 or 26.1.2. Where Is It and Searchables are bundled.
 
 ## Build (this branch)
 
 Prereqs: **Java 25** (set `JAVA_HOME` to a JDK 25 — building on plain Java 21 fails
-with `release version 25 not supported`), plus a GitHub classic token with
-`read:packages` (JackFredLib/WhereIsIt come from GitHub Packages).
+with `release version 25 not supported`) and internet access for public Maven
+dependencies. No GitHub package token is required to build.
 
 ```powershell
 cd mod
-copy .env.example .env   # fill GITHUB_ACTOR (your username) + GITHUB_TOKEN
-.\gradlew.bat build -x test
+.\gradlew.bat build --no-daemon
 # jar: mod\build\libs\chesttracker-*.jar  (name contains the commit hash)
 ```
 
-`.env` is gitignored — never commit it. No unit tests in the mod (`check` only);
-server tests live in `server/` (`pytest test_api.py test_server.py`).
+Release credentials may be supplied through a gitignored `.env`; never commit
+it. The build runs portable codec tests
+against the game registry. Server checks and the in-game compatibility matrix
+are documented in [TESTING.md](../docs/TESTING.md). Litematica and MaLiLib are
+resolved as versioned compile-only dependencies; old vendored jars are not used.
+
+Release links and GitHub publishing target this CMSync repository. Modrinth and
+CurseForge publishing require explicit `modrinth_project_id` or
+`curseforge_project_id` Gradle properties plus the corresponding token; upstream
+ChestTracker project IDs are not used for CMSync uploads.
+
+For an isolated game startup check, run
+`.\gradlew.bat runClient -Prun_directory=build/smoke-client --no-daemon`.
 
 ## Branches
 
-| | `main` (this file) | `26.1.2` |
-|---|---|---|
-| Base | QMSync `1.21.11` | ponuing/ChestTracker `26.1.2` |
-| Java to build | 21 (default toolchain) | **25** (`JAVA_HOME` → a JDK 25, else `release version 25 not supported`) |
-| `sendChat` | `player.displayClientMessage(msg, false)` | `player.sendSystemMessage(msg)` |
-| Commands registration | `ClientCommandManager` | `ClientCommands` |
-| Litematica mixin anchor | `initGui` TAIL (same shape both branches) | `initGui` TAIL (same shape both branches) |
-| Releases | `chesttracker-*-mc1.21.11.jar` | `chesttracker-*-mc26.1.2.jar` |
+| Target | Source | Java | Status |
+|---|---|---|---|
+| 26.2 | This update | 25 | Primary client |
+| 26.1.2 | `26.1.2` before this update | 25 | Older compatible release |
+| 1.21.11 | `main` | 21 | Older compatible release |
+
+Do not copy a newer jar into an older game installation. Cross-version sync
+compatibility does not make game binaries interchangeable. Portable envelopes
+remain `cmsync.item` v1 inside protocol v2, and no server behavior change is
+needed for this port. Very old clients without portable support keep their
+existing normalized fallback limitations.
 
 Porting rule: keep the overlay logic identical; only adapt call sites the compiler
 rejects. Protocol (`protocol/PROTOCOL.md`) is version-frozen at v2.

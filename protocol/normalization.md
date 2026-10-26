@@ -1,4 +1,4 @@
-# Item normalization (cross-version: 1.21.11 / 26.1.2)
+# Item normalization (cross-version: 1.21.11 / 26.1.2 / 26.2)
 
 Vanilla `ItemStack` codec output changes across MC versions (new components, renamed fields).
 Full-bank raw replace breaks across versions. So:
@@ -96,11 +96,17 @@ Slots are explicit so an unknown item does not shift later inventory entries.
 
 1. On push: map each `ItemStack` → `{id: registry id, count, componentsDigest}` + keep
    the native `raw.memory` and portable `raw.portable` chunks.
-2. On pull: if `raw.mc` equals your MC version, apply `raw.memory` (full restore);
-   else build stacks from the normalized list
-   (count + id, no components → tooltip shows base item, still searchable).
+2. On pull: decode `raw.portable` with local component codecs when present.
+   Same-version `raw.memory` supplies native metadata. If neither representation
+   can restore items, build stacks from the normalized list (count + id).
+   Always retain the original observation timestamp.
 3. Strip list: never send `minecraft:air` / empty stacks. Clamp count to >=1.
-4. Tolerate unknown `id`s from newer versions: keep them, show fallback name, still countable.
+4. Tolerate unknown `id`s from newer versions: preserve their portable JSON and
+   normalized server counts. The local game cannot display unknown items.
+5. Only merge shadow components absent from the local patch when their type or
+   value is not decodable locally. A reset of a known component must not restore
+   its old shadow value. Reject negative, fractional, and out-of-range slots
+   (the current client allocation limit is 4096 slots).
 
 ## Server duties
 
