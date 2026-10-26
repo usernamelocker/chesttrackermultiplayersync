@@ -2,10 +2,14 @@
 
 The primary client now targets Minecraft **26.2**, using ponuing/ChestTracker's
 26.2 game API migration with CMSync preserved. `26.2` is the default branch;
-`1.21.11` contains the older client. Existing 1.21.11 and 26.1.2 releases remain
+`26.1.2` and `1.21.11` contain the older clients. Existing older releases remain
 compatible with the shared server. See
 [Branches](#branches) for build targets. The server in repo-root `server/`
 serves all three versions through protocol v2.
+
+Installable jars, source archives, and checksums are published on
+[GitHub Releases](https://github.com/usernamelocker/chesttrackermultiplayersync/releases/tag/v2.9.0).
+Use the [download guide](../docs/RELEASES.md) to select the right asset.
 
 ## Our changes vs upstream
 
@@ -84,11 +88,11 @@ For an isolated game startup check, run
 | 26.2 | `26.2` (default branch) | 25 | Primary client |
 | 26.1.2 | `26.1.2` | 25 | Older compatible client |
 | 1.21.11 | `1.21.11` | 21 | Older compatible client |
-| 26.2 | `main` | 25 | Latest-code alias for existing VPS references |
 
 The server runtime and Docker configuration are the same across these branches.
-Portainer can keep tracking `main`; the client target does not select a different
-sync server implementation. Keep shared server fixes synchronized across branches.
+Portainer uses `refs/heads/26.2` and `server/docker-compose.yml`; the client
+target does not select a different sync server implementation. There is no
+separate `main` branch. Keep shared server fixes synchronized across branches.
 
 Do not copy a newer jar into an older game installation. Cross-version sync
 compatibility does not make game binaries interchangeable. Portable envelopes

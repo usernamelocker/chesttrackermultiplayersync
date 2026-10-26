@@ -1,113 +1,78 @@
-# START HERE (Portainer, step by step)
+# Set up the shared CMSync server
 
-You don't need to understand the grey recipe box (that's YAML — just ignore what it says).
-You only fill in a small table of settings. Portainer pulls everything from GitHub itself.
+Minecraft 26.2 is the primary client release. The same server supports older
+26.1.2 and 1.21.11 clients. It is separate from the Minecraft game server.
 
-## One-time setup (about 5 minutes)
+## Deploy with Portainer
 
-1. Portainer → **Stacks** → **Add stack** → name it `chest-tracker` (any name works).
-2. Under **Build method**, pick **Repository** (NOT Web editor):
-   - Repository URL: `https://github.com/usernamelocker/chesttrackermultiplayersync`
-   - Repository reference: `refs/heads/main` (retained for VPS deployment;
-     GitHub's default `26.2` branch is the primary client source. Both use the
-     same shared server runtime).
-   - Compose path: `server/docker-compose.yml`
-   - Turn ON **Repository authentication** (the repo is private) and enter your GitHub
-     username + a token. Any token with `repo` read access works.
-3. Scroll to **Environment variables** and add (copy the names letter for letter —
-   full reference with examples: `server/stack.env.example`):
-   - `EXPECTED_SERVER_ID` → `multiplayer/fabriccraft_net` (this is `fabriccraft.net`
-     with dots as underscores; tell all players to join via exactly `fabriccraft.net`,
-     no port, so everyone lands in one bank — comparison is case-insensitive).
-   - `SERVER_ID_ALIASES` → `multiplayer/vip_fabriccraft_net` (safety net: players who
-     join via `vip.fabriccraft.net` merge into the same bank instead of a split one).
-   - Token mode: leave `WHITELIST_UUIDS` **empty**, set `SHARED_TOKEN` to a long random
-     password (24+ random letters/numbers). Everyone who knows it can sync.
-   - `ADMIN_TOKEN` → a **different** long random password. Used only for
-     `/cmsync wipealldata` (entered in-game under CM Settings, never in the Sync tab).
-     ⚠️ In Portainer/docker-compose, escape every `$` as `$$`
-     (`abc$X` → `abc$$X`) or compose silently eats it and the stored token won't match.
-   - Leave everything else alone — safe defaults are baked in.
-4. Click **Deploy the stack**. Then Containers → click `cmsync` → **Logs**.
-   Wait until you see `Uvicorn running` (it says port 8000 inside the container — normal;
-   the compose file publishes it outside as 7000). That means it's alive.
-5. In your browser open `http://YOUR-VPS-IP:7000/health`
-   (replace YOUR-VPS-IP with the VPS address). You should see `{"ok":true,...}`.
-   Done — server is up.
+For an existing deployment, follow [Portainer operations](PORTAINER.md) instead
+of creating a new stack. Keep the existing settings and data volumes.
 
-> Changing anything later = same flow: Stacks → stack → change env → **Update the
-> stack WITH rebuild** (a plain container restart keeps the old code — rebuild pulls
-> the new code from GitHub).
+For a new deployment:
 
-## Connect the game
+1. Open **Stacks → Add stack** and choose a name such as `chest-tracker`.
+2. Select **Repository** as the build method.
+3. Set the repository to `https://github.com/usernamelocker/chesttrackermultiplayersync`.
+4. Set the repository reference to **`refs/heads/26.2`**.
+5. Set the compose path to **`server/docker-compose.yml`**. The server build
+   context is `server/`; no client build or Minecraft installation is needed.
+6. Enable repository authentication if the repository is private, using an
+   account/token with repository read access.
+7. Add the environment settings below, then deploy the stack.
+8. Check the container logs for startup and open `http://VPS-IP:7000/health`.
 
-1. Install the right jar from
-   [GitHub Releases](https://github.com/usernamelocker/chesttrackermultiplayersync/releases)
-   (`chesttracker-*-mc26.2.jar` for the primary release, or the matching older
-   1.21.11/26.1.2 jar) + Fabric API + YACL for that Minecraft version.
-2. In-game: Memory Bank menu (`` ` `` key → pencil icon) → **Sync** tab →
-   paste `http://YOUR-VPS-IP:7000` + the SHARED token → Connect.
-   (URL box also accepts `host:port` without scheme and `https://` addresses.)
-3. **CM Settings** tab → check the toggles (interval, ender chest, container names,
-   chat notifications) + paste the ADMIN token into the Admin token row if you want
-   wipe access on this PC.
-4. `/cmsync status` should say `synced` within ~10 seconds.
+The repository has no `main` branch. Existing stacks pinned to `main` must
+change their repository reference to `refs/heads/26.2` before the next pull or
+redeploy. The `/server` folder selection is independent of the branch reference.
 
-## Wipe (fresh start)
+## Environment settings
 
-The server also protects established banks from accidental delete-only pushes.
-Those pushes return `QUARANTINED` and leave the database unchanged. This guard
-does not block the intentional admin wipe below.
+| Setting | What to enter |
+|---|---|
+| `EXPECTED_SERVER_ID` | Exact bank/server ID shown by `/cmsync status`, such as `multiplayer/fabriccraft_net` |
+| `SERVER_ID_ALIASES` | Optional comma-separated alternative addresses for the same Minecraft network |
+| `SHARED_TOKEN` | Long random password entered by players in the Sync tab |
+| `ADMIN_TOKEN` | Different long random password for confirmed wipes and restores |
+| `WHITELIST_UUIDS` | Leave empty for shared-token mode; otherwise provide permitted player UUIDs |
 
-`/cmsync wipealldata` → read the warning → `/cmsync wipealldata confirm` within
-60s. Needs the admin token (CM Settings). Zeroes the server, bumps a generation
-counter so every connected (and later returning) client clears its locals too.
-Snapshots are kept — see [`../docs/BACKUPS.md`](../docs/BACKUPS.md).
+Use [stack.env.example](stack.env.example) for the complete settings and defaults.
+When entering values into a Compose-interpolated environment table, escape each
+literal `$` as `$$`. Keep production credentials out of Git and screenshots.
+Defaults publish port `7000` and preserve the database and backups in named volumes.
 
-## Custom domain + HTTPS (nginx)
+## Connect players
 
-`http://IP:7000` works fine for testing. For `https://chesttracker.example.com`
-(no port in the URL):
+1. Download the [matching client jar](../docs/RELEASES.md). For 26.2, install
+   Java 25, Fabric Loader 0.19.5+, and the 26.2 releases of Fabric API and YACL.
+2. Open the Memory Bank menu with the grave key, then open **Sync**.
+3. Enter the sync server URL and **shared token**, then connect.
+4. Put an admin token only in **CM Settings → Admin token** when admin actions
+   are needed. It is not the Sync tab password.
+5. Open a chest and check `/cmsync status`. All clients must use the same
+   canonical server ID or configured aliases.
+
+## Optional HTTPS reverse proxy
+
+The supplied Compose stack publishes the service on **host port 7000**.
+For nginx running on that host, proxy to `127.0.0.1:7000`:
 
 ```nginx
 server {
+    listen 80;
     server_name chesttracker.example.com;
-    client_max_body_size 20m;   # REQUIRED: pushes are multi-MB; nginx default is 1m
-                                # and every push dies with 413 otherwise
-
+    client_max_body_size 20m;
     location / {
-        proxy_pass http://127.0.0.1:8000/;
+        proxy_pass http://127.0.0.1:7000;
         proxy_http_version 1.1;
         proxy_set_header Host $http_host;
     }
-
-    listen 443 ssl;   # certs via certbot (see below)
 }
 ```
 
-1. Point the domain's A record at the VPS.
-2. `certbot --nginx -d chesttracker.example.com` (fills the `ssl_*` lines).
-3. `nginx -t && systemctl reload nginx`.
-4. In-game URL becomes `https://chesttracker.example.com` (no port).
+Point the domain at the VPS, configure a certificate with your normal HTTPS
+tooling, and use `https://chesttracker.example.com` in the client. Container
+port `8000` is internal; deployments that run uvicorn directly can use their
+own configured host port instead. Keep the proxy body limit large enough for pushes.
 
-Alternative without a domain (HTTPS on a port): a Caddy block like
-`your.domain:7000 { reverse_proxy localhost:8000 }` gets certs automatically.
-
-## If something is red
-
-* State shows **Access denied** → wrong token (Sync tab needs the SHARED token,
-  admin token goes in CM Settings) or wrong `serverId` (compare with
-  `/cmsync status` → `server: [...]`; fix `EXPECTED_SERVER_ID`/`SERVER_ID_ALIASES`,
-  everyone must join via the identical address).
-* Chat spams **push failed: CONNECTION_FAILED** but connects fine → the reverse
-  proxy is eating push bodies: set `client_max_body_size 20m;` (above) and reload.
-  Confirm in `<game>/chesttracker/cmsync.log` (`push ... http=413`).
-* No data arrives but no errors → read the tail of `cmsync.log`:
-  `pull ... changes=0` = server withholds (range gate / wrong bank);
-  `changes=N` + empty screen = client-side, report the lines.
-* Server-side truth: Portainer → container **Logs**. Denied handshakes/pulls log
-  `handshake DENIED <reason> player=<uuid> got=<id> want=<id>` — copy that line,
-  it names the exact mismatch.
-* `/health` doesn't load → stack didn't deploy: Stacks → open it, read the message.
-* Wipe says `ACCESS_DENIED admin token required` → put `ADMIN_TOKEN` in the
-  CM Settings Admin token row (NOT the Sync tab token box), then retry.
+For denied connections, HTTP 413, validation errors, backups, and redeploys,
+see [Portainer operations](PORTAINER.md) and [Testing](../docs/TESTING.md).

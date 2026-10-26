@@ -1,4 +1,7 @@
-# Item normalization (cross-version: 1.21.11 / 26.1.2 / 26.2)
+# Item normalization (26.2 primary; 26.1.2 and 1.21.11 compatible)
+
+The server stores the same format for all supported clients. See
+[Protocol v2](PROTOCOL.md) and [release compatibility](../docs/RELEASES.md).
 
 Vanilla `ItemStack` codec output changes across MC versions (new components, renamed fields).
 Full-bank raw replace breaks across versions. So:
@@ -6,12 +9,14 @@ Full-bank raw replace breaks across versions. So:
 ## Rule
 
 * **Index/merge/search on normalized form only:** `{id, count}`.
-* **Preserve `raw` per writer version** for same-version fidelity, but never require other versions to parse it.
+* **Preserve `raw` with its writer's Minecraft version** for same-version fidelity,
+  but never require other versions to parse it. The server keeps the winning
+  observation, not a separate bank per game version.
 * Each norm entry carries a `componentsDigest` marker (currently the literal `"v1"`;
   digests are intentionally excluded from equality/hashes — see projection).
 
 ```json
-{"id": "minecraft:iron_ingot", "count": 64, "componentsDigest": "abc123…"}
+{"id": "minecraft:iron_ingot", "count": 64, "componentsDigest": "v1"}
 ```
 
 ## Fidelity layer (cmsync.2+): native and portable data inside `raw`
@@ -22,7 +27,7 @@ change additionally carries (all inside the server-opaque `raw` blob — no serv
 ```json
 "raw": {
   "v": 2,
-  "mc": "1.21.11",
+  "mc": "26.2",
   "memory": { "...Memory.CODEC JSON: items with full components, name, container..." },
   "portable": {
     "format": "cmsync.item",

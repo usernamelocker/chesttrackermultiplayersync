@@ -1,5 +1,9 @@
 # Tokens & access: where players type what
 
+These instructions apply to the primary 26.2 client and compatible older
+26.1.2/1.21.11 releases. Install a [matching release jar](RELEASES.md); everyone
+connects to the same shared server.
+
 ## In the menu
 
 Memory Bank menu (`` ` `` key → pencil icon):
