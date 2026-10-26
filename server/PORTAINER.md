@@ -5,7 +5,7 @@ This file is the operations companion.
 
 ## Stack shape
 
-* Build method: **Repository** → repo URL, branch `main`, compose path
+* Build method: **Repository** → repo URL, reference `refs/heads/main`, compose path
   `server/docker-compose.yml`, authentication ON (private repo).
 * Compose builds `./Dockerfile`, publishes `7000→8000`, data in named volumes
   `cmsync-data` (SQLite) and `cmsync-backups` (file backups) — both survive updates.
@@ -15,6 +15,27 @@ This file is the operations companion.
   (`SNAPSHOT_*`, `MAX_DELETE_*`, `RANGE_BLOCKS`, `TOMBSTONE_TTL_DAYS`).
 
 ## Update / redeploy
+
+### Upgrading clients to Minecraft 26.2
+
+This is a client update using the existing protocol v2. Keep the VPS stack on
+`refs/heads/main`. Players install the matching
+26.2 mod jar and its required Fabric dependencies; older players keep their
+matching older jars. No server redeploy or database migration is required for
+the game-version upgrade alone.
+
+GitHub's default branch is `26.2`; `main` is retained as the latest-code alias
+for existing deployments. The same server runtime and Docker configuration are
+maintained across `main`, `26.2`, `26.1.2`, and `1.21.11`. The branch names select
+client source targets; one server serves all supported clients simultaneously.
+This reorganization preserves the previously deployed `main` server behavior,
+including omission of coordinates from `/api/pullWebPage`.
+
+No Portainer reference change is needed. Leave the compose path, ports, tokens,
+server identifiers, volume names, and stack name unchanged. Preserve the
+existing data and backup volumes.
+
+### Deploying a separately reviewed server update
 
 The full environment reference is [`stack.env.example`](stack.env.example),
 including `FULL_WIPE_MIN_BANK`, which protects established banks from accidental

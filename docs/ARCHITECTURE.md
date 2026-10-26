@@ -1,6 +1,6 @@
 # Architecture
 
-CMSync has two independent client builds and one shared server implementation.
+CMSync has a primary 26.2 client, older client releases, and one shared server implementation.
 The clients retain an offline-first local memory bank; the server is an
 authenticated merge and distribution layer.
 
@@ -8,6 +8,7 @@ authenticated merge and distribution layer.
 Client 1.21.11 --+                         +-- local bank + CMSyncManager
                  +-- HTTPS push/pull -------+
 Client 26.1.2  --+                         +-- local bank + CMSyncManager
+Client 26.2    --+                         +-- local bank + CMSyncManager
                                               |
                               FastAPI + SQLite server
                               memories and tombstones

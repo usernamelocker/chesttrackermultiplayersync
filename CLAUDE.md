@@ -3,8 +3,8 @@
 ## Project scope
 
 CMSync synchronizes ChestTracker memory state between Minecraft clients and a
-self-hosted FastAPI/SQLite server. Supported client versions are Minecraft
-`1.21.11` and `26.1.2`.
+self-hosted FastAPI/SQLite server. Minecraft `26.2` is the primary client target;
+older `1.21.11` and `26.1.2` releases share protocol v2 with it.
 
 ## Source of truth
 
@@ -16,12 +16,17 @@ self-hosted FastAPI/SQLite server. Supported client versions are Minecraft
 
 ## Branches and builds
 
-- `main` targets Minecraft `1.21.11` and builds with Java 21.
+- `26.2` is the default branch, targets Minecraft `26.2`, and builds with Java 25.
 - `26.1.2` targets Minecraft `26.1.2` and builds with Java 25.
+- `1.21.11` targets Minecraft `1.21.11` and builds with Java 21.
+- `main` follows the latest 26.2 code and remains the existing VPS deployment ref.
+- Server runtime and deployment files must match across all four refs. A client
+  upgrade does not require a server-code migration or database migration.
 - Build from `mod/` with `gradlew.bat build --no-daemon`.
-- The mod has no useful Java unit-test suite; server tests are in `server/`.
+- On `26.2`/`main`, the mod's `test` task checks the portable codec against the game registry.
 - Run server tests with `python -m pytest test_api.py test_server.py` from
-  `server/`. `test_api.py` exercises the FastAPI contract without a server.
+  `server/`; also include `test_portable_format.py` and `test_cross_version.py`.
+  `test_api.py` exercises the FastAPI contract without a server.
 
 ## Synchronization invariants
 
@@ -56,7 +61,8 @@ changes. Review `git diff` and `git diff --check` before committing.
 - Make logically separated commits with descriptive messages.
 - Never force-push, rewrite unrelated history, delete branches, or create tags
   unless explicitly requested.
-- Releases contain both supported-version jars and `SHA256SUMS.txt`. Server-only
+- Releases identify 26.2 as primary, retain older compatible jars, and include
+  `SHA256SUMS.txt`. Server-only
   changes may still be released with compatibility artifacts, but document when
   no new client implementation is required.
 - Push only when the user explicitly requests it; use normal branch pushes and

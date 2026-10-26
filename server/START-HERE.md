@@ -8,7 +8,9 @@ You only fill in a small table of settings. Portainer pulls everything from GitH
 1. Portainer → **Stacks** → **Add stack** → name it `chest-tracker` (any name works).
 2. Under **Build method**, pick **Repository** (NOT Web editor):
    - Repository URL: `https://github.com/usernamelocker/chesttrackermultiplayersync`
-   - Branch: `main`
+   - Repository reference: `refs/heads/main` (retained for VPS deployment;
+     GitHub's default `26.2` branch is the primary client source. Both use the
+     same shared server runtime).
    - Compose path: `server/docker-compose.yml`
    - Turn ON **Repository authentication** (the repo is private) and enter your GitHub
      username + a token. Any token with `repo` read access works.
@@ -41,7 +43,8 @@ You only fill in a small table of settings. Portainer pulls everything from GitH
 
 1. Install the right jar from
    [GitHub Releases](https://github.com/usernamelocker/chesttrackermultiplayersync/releases)
-   (`chesttracker-*-mc1.21.11.jar` or `chesttracker-*-mc26.1.2.jar`) + Fabric API + YACL.
+   (`chesttracker-*-mc26.2.jar` for the primary release, or the matching older
+   1.21.11/26.1.2 jar) + Fabric API + YACL for that Minecraft version.
 2. In-game: Memory Bank menu (`` ` `` key → pencil icon) → **Sync** tab →
    paste `http://YOUR-VPS-IP:7000` + the SHARED token → Connect.
    (URL box also accepts `host:port` without scheme and `https://` addresses.)
