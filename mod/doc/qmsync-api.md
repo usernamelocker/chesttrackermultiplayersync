@@ -1,3 +1,5 @@
+> Historical QMSync API notes for the older 1.21.11 client. The current 26.2 CMSync release uses [Protocol v2](../../protocol/PROTOCOL.md); see [Downloads](../../docs/RELEASES.md). These notes do not define the current server contract.
+
 # QMSync HTTP API Contract (protocol version 1)
 
 This document is the contract between the QMTracker mod (client) and the QMSync website (server).

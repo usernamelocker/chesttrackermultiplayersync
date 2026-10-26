@@ -1,5 +1,9 @@
 # Testing
 
+Minecraft 26.2 is the primary target and default branch. Older 26.1.2 and
+1.21.11 clients use the same shared server. Select jars from
+[Downloads and releases](RELEASES.md).
+
 ## Server (no MC needed)
 
 ```powershell
@@ -20,7 +24,7 @@ python smoke.py http://VPS-IP:7000 YOURTOKEN
 
 1. Server: fill `.env`/stack env (`EXPECTED_SERVER_ID` from step 3, `SHARED_TOKEN`),
    deploy. Or local: `uvicorn app:app` + `smoke.py`.
-2. Mod: install the release jars for both MC versions (see repo README) on 2 PCs
+2. Mod: install matching release jars for the two game versions being tested on 2 PCs
    (or 2 game dirs) with different accounts, same MC server.
 3. Player A: `/cmsync status` → `server: [multiplayer/...]` must equal
    `EXPECTED_SERVER_ID` (or an alias) — same address typed identically by everyone.
@@ -62,7 +66,7 @@ return `QUARANTINED`, create a snapshot, and keep the containers. Confirm that
 
 ## Client automated checks (Java 25)
 
-On `26.2`/`main`, from `mod/`, run `.\gradlew.bat build --no-daemon`. The `test` task exercises
+On `26.2`, from `mod/`, run `.\gradlew.bat build --no-daemon`. The `test` task exercises
 the real portable codec and game registry: foreign JSON preservation, component
 reset/removal, malformed components, and bounded slot allocation. Server tests
 exercise storage and HTTP compatibility; they do not replace the in-game matrix.
@@ -74,6 +78,9 @@ exercise storage and HTTP compatibility; they do not replace the in-game matrix.
 - Server regression suite: 21 tests passed, including all nine writer/reader
   combinations of 1.21.11, 26.1.2, and 26.2 through protocol-v2 HTTP endpoints.
 - Local Markdown file links resolve, and `git diff --check` passes.
+- The release jar's embedded version, Minecraft/Loader requirements, bundled
+  dependency paths, and license were verified. `SHA256SUMS.txt` covers all four
+  published jars; older compatibility jars match the original v1.0.8 hashes.
 - The isolated 26.2 development client initialized OpenGL, resources, CMSync,
   and the Jade integration. Offline development accounts report expected
   Minecraft/Realms authentication errors; those do not indicate a sync failure.

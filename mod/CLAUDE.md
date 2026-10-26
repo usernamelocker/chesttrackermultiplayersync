@@ -1,3 +1,5 @@
+> This guide applies only to the older 1.21.11 client. Minecraft 26.2 is the primary/default branch. Follow the [repository guidance](../CLAUDE.md) and [current download guide](../docs/RELEASES.md) for branch and release policy.
+
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
