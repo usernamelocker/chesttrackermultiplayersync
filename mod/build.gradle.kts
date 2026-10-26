@@ -268,6 +268,7 @@ tasks.test {
 }
 
 tasks.withType<ProcessResources>().configureEach {
+    inputs.property("modVersion", project.version.toString())
     filesMatching("fabric.mod.json") {
         expand(mapOf("version" to version))
     }
