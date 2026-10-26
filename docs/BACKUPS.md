@@ -2,12 +2,18 @@
 
 Two layers; either alone recovers a wipe.
 
+This is the shared server for 26.2 (primary), 26.1.2, and 1.21.11. A 26.2 client
+upgrade does not change the database format or require new volumes. Keep the
+existing data when changing the repository reference; see
+[Portainer operations](../server/PORTAINER.md).
+
 ## 1. DB snapshots (in SQLite, automatic)
 
 * Server auto-`take_snapshot(serverId)` at most every `SNAPSHOT_INTERVAL_MIN` (default 15min) on push.
 * Keeps last `SNAPSHOT_KEEP` (default 96 = 24h at 15min).
-* Mass deletes snapshot **before applying** (they go through + warning log, nothing
-  is rejected — the snapshot is the undo).
+* Partial mass deletes snapshot **before applying** and log a warning. Exact
+  full-bank delete pushes against established banks are instead quarantined
+  without being applied; the snapshot is retained for recovery.
 * Wipes do not delete snapshots.
 * List: `GET /api/snapshots?serverId=...`
 * Restore (admin token): `POST /api/restore {"serverId": "...", "snapshotId": 12}` →

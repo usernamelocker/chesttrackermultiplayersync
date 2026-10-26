@@ -5,15 +5,12 @@ The clients retain an offline-first local memory bank; the server is an
 authenticated merge and distribution layer.
 
 ```text
-Client 1.21.11 --+                         +-- local bank + CMSyncManager
-                 +-- HTTPS push/pull -------+
-Client 26.1.2  --+                         +-- local bank + CMSyncManager
-Client 26.2    --+                         +-- local bank + CMSyncManager
-                                              |
-                              FastAPI + SQLite server
-                              memories and tombstones
-                              revisions and change events
-                              snapshots and generations
+1.21.11 client --\
+26.1.2 client ----+-- HTTPS push/pull --> shared FastAPI + SQLite server
+26.2 client -----/                       memories, tombstones, revisions,
+  (primary)                             snapshots, and wipe generations
+
+Each client retains its own offline-first local bank and CMSyncManager.
 ```
 
 ## Design decisions
@@ -47,8 +44,9 @@ Client 26.2    --+                         +-- local bank + CMSyncManager
    is in either dimension. Nether horizontal coordinates are scaled by 8 when
    compared with the Overworld-equivalent range. Other dimensions are isolated;
    ender-style keys have no meaningful position and bypass the range gate.
-6. The client LWW-merges the response on the client thread. Same-version native
-   data is preferred, then portable data, then normalized fallback data.
+6. The client LWW-merges the response on the client thread. On the 26.2 client,
+   portable item data supplies supported components; same-version native data
+   supplies memory metadata, and normalized data is the final item fallback.
 7. `/api/view/{serverId}` aggregates `items_norm` for website/Discord consumers.
 
 ## Wipes, restore, and recovery
@@ -63,6 +61,10 @@ An accidental full-bank push returns a `snapshotId` and logs
 are in [BACKUPS.md](BACKUPS.md) and [PORTAINER.md](../server/PORTAINER.md).
 
 ## Key files
+
+`26.2` is the default branch. `26.1.2` and `1.21.11` retain older client source;
+their `server/` directories are identical. See [Downloads](RELEASES.md) and
+[Portainer operations](../server/PORTAINER.md) for releases and deployment refs.
 
 - Protocol: `protocol/PROTOCOL.md`, `protocol/normalization.md`
 - Server: `server/app.py`, `server/db.py`, `server/models.py`,

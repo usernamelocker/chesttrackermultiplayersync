@@ -1,111 +1,92 @@
 # ChestTracker Multiplayer Sync (CMSync)
 
-CMSync shares ChestTracker memory state between players through a self-hosted
-FastAPI/SQLite server. It supports shared search, per-player ender-chest
-profiles, cross-version item data, and a website/Discord read view.
+CMSync shares ChestTracker memories between Minecraft clients through one
+self-hosted FastAPI/SQLite server. **Minecraft Java 26.2 Fabric is the primary
+version**, and `26.2` is the GitHub default branch. Older 26.1.2 and 1.21.11
+clients can keep using the same protocol-v2 server.
 
-Minecraft **26.2 (Fabric, Java 25)** is the primary target for new builds.
-Older `1.21.11` and `26.1.2` releases can keep using the same sync server and
-protocol v2. Install a jar built for your Minecraft version; a 26.2 jar cannot
-run on an older game. Back up your local memory banks before upgrading.
+## Downloads and installation
+
+**[Download the 26.2 jar](https://github.com/usernamelocker/chesttrackermultiplayersync/releases/download/v2.9.0/chesttracker-2.9.0-mc26.2.jar)**
+· [Release notes and all assets](https://github.com/usernamelocker/chesttrackermultiplayersync/releases/tag/v2.9.0)
+· [SHA256SUMS.txt](https://github.com/usernamelocker/chesttrackermultiplayersync/releases/download/v2.9.0/SHA256SUMS.txt)
+
+For 26.2, install Java 25, Fabric Loader **0.19.5 or newer**, and the **26.2**
+versions of Fabric API and YACL. Put the CMSync jar in your client's `mods/`
+folder. Where Is It, JackFredLib, and Searchables are bundled. Optional mods
+need their own compatible 26.2 releases. Back up local memory banks first.
+
+Older players must use their matching older jars. The latest release also
+includes unchanged 26.1.2 and 1.21.11 compatibility jars from v1.0.8;
+see [Downloads and releases](docs/RELEASES.md) for exact filenames and links.
+Do not install a `-sources.jar` in Minecraft.
 
 ## Start here
 
-| You are... | Read |
+| Task | Guide |
 |---|---|
-| Playing | Download the matching jar from [GitHub Releases](https://github.com/usernamelocker/chesttrackermultiplayersync/releases), then follow [Tokens & access](docs/TOKENS.md). |
-| Hosting | Follow [server/START-HERE.md](server/START-HERE.md). Use [Portainer operations](server/PORTAINER.md) for redeploys and diagnosis. |
-| Building | Read [mod/CMSYNC.md](mod/CMSYNC.md) for branches, Java versions, and build commands. |
-| Debugging | Read [docs/TESTING.md](docs/TESTING.md) and inspect `chesttracker/cmsync.log`. |
+| Connect a player | [Tokens and access](docs/TOKENS.md) |
+| Deploy the shared server | [Server setup](server/START-HERE.md) |
+| Maintain an existing VPS | [Portainer operations](server/PORTAINER.md) |
+| Build a client | [Client build guide](mod/CMSYNC.md) |
+| Download or verify a release | [Downloads and releases](docs/RELEASES.md) |
+| Diagnose or test sync | [Testing](docs/TESTING.md) |
+| Recover data | [Backups](docs/BACKUPS.md) |
 
-## How it works
+## Version branches
 
-- Each bank is keyed by `serverId`; aliases can be canonicalized by the server.
-- Synchronization is per container `(key, pos)` using last-observation-wins
-  timestamps. Memory rows and tombstones share one logical LWW stream.
-- Pushes include normalized `{id,count}` data for search and aggregation, native
-  data for same-version fidelity, and a portable component envelope for
-  cross-version decoding and foreign-component preservation. See
-  [protocol/normalization.md](protocol/normalization.md).
-- Pulls are incremental using durable revisions and are range-gated. While a
-  player is in the Overworld or Nether, nearby containers from both dimensions
-  are eligible; Nether horizontal coordinates use the 1:8 portal scale. Other
-  dimensions remain isolated and ender-style keys are exempt from spatial gating.
-- Partial mass deletes are snapshotted and applied. A delete-only push covering
-  every stored container in an established bank is snapshotted and returned as
-  `QUARANTINED` instead of being applied. Empty pushes against a non-empty bank
-  are also ignored as hub-wipe protection.
-- `/cmsync wipealldata` is the intentional admin wipe path. It clears server
-  state, advances the generation, and causes offline clients to clear stale
-  local state when they return.
+| Branch | Minecraft | Build Java | Status |
+|---|---|---|---|
+| [`26.2`](https://github.com/usernamelocker/chesttrackermultiplayersync/tree/26.2) | 26.2 | 25 | Default branch and primary development target |
+| [`26.1.2`](https://github.com/usernamelocker/chesttrackermultiplayersync/tree/26.1.2) | 26.1.2 | 25 | Older compatible client |
+| [`1.21.11`](https://github.com/usernamelocker/chesttrackermultiplayersync/tree/1.21.11) | 1.21.11 | 21 | Older compatible client |
+
+There is no separate `main` branch. All three branches contain identical
+`server/` files. The branch selects the client source target; the server is
+shared and does not need a separate deployment for each Minecraft version.
+
+## Existing VPS deployment
+
+Use repository reference **`refs/heads/26.2`**, compose path
+**`server/docker-compose.yml`**, and the existing `/server` build context.
+If Portainer still explicitly references `main`, update that reference before
+its next Git pull or redeploy. A folder path and a branch reference are separate
+settings; selecting `/server` alone does not select the Git branch.
+
+The server runtime and Docker configuration preserve the previous production
+behavior. Keep the stack name, ports, tokens, server IDs, and named volumes
+unchanged. Installing the 26.2 client requires no server rebuild or database
+migration. See [Portainer operations](server/PORTAINER.md).
+
+## Synchronization and compatibility
+
+- Local memories remain available offline. Failed pushes remain retryable.
+- Containers are keyed by `(serverId, key, pos)`. Observations and tombstones
+  share last-observation-wins ordering; stale updates cannot undo newer deletes.
+- Incremental pulls use durable revisions. Spatial pulls include nearby
+  Overworld/Nether containers with the 1:8 portal scale; other dimensions are
+  isolated and ender-chest keys are exempt from spatial gating.
+- Normalized item IDs/counts support search. Native data and portable
+  `cmsync.item` v1 envelopes preserve richer components where peers support them.
+  Older games cannot display unknown items, and older binaries retain their
+  original fallback behavior.
+- Suspected exact full-bank delete pushes are snapshotted and quarantined.
+  `/cmsync wipealldata` remains the explicit, confirmed admin wipe path.
+
+See [Architecture](docs/ARCHITECTURE.md), [Protocol v2](protocol/PROTOCOL.md),
+[Item format](protocol/normalization.md), and the
+[validation record](docs/TESTING.md#262-port-validation-2026-10-27).
 
 ## Repository layout
 
 ```text
-mod/                Buildable client source for the checked-out version branch.
-server/             FastAPI + SQLite authoritative store and deployment files.
-protocol/           HTTP contract and cross-version item format.
-docs/               Architecture, access, testing, and backup guides.
-client/overlay/      Retired patch copies; mod/ is the source of truth.
-releases/            Local ignored artifacts; published assets live on GitHub.
+mod/                Client source for the checked-out version branch.
+server/             Shared server runtime, tests, and deployment files.
+protocol/           HTTP contract and portable item format.
+docs/               Downloads, operations, architecture, and validation.
+client/overlay/     Retired history; do not use as an implementation.
 ```
-
-## Documentation index
-
-- Protocol: [PROTOCOL.md](protocol/PROTOCOL.md), [normalization.md](protocol/normalization.md)
-- Server: [START-HERE.md](server/START-HERE.md), [PORTAINER.md](server/PORTAINER.md),
-  [README.md](server/README.md), [stack.env.example](server/stack.env.example)
-- Mod: [CMSYNC.md](mod/CMSYNC.md), [upstream mod README](mod/README.md)
-- Concepts: [ARCHITECTURE.md](docs/ARCHITECTURE.md), [TOKENS.md](docs/TOKENS.md),
-  [TESTING.md](docs/TESTING.md), [BACKUPS.md](docs/BACKUPS.md)
-
-## Branches and releases
-
-| Branch | Minecraft | Java | Purpose |
-|---|---|---|---|
-| [`26.2`](https://github.com/usernamelocker/chesttrackermultiplayersync/tree/26.2) | 26.2 | 25 | Default branch and primary client |
-| [`26.1.2`](https://github.com/usernamelocker/chesttrackermultiplayersync/tree/26.1.2) | 26.1.2 | 25 | Older compatible client |
-| [`1.21.11`](https://github.com/usernamelocker/chesttrackermultiplayersync/tree/1.21.11) | 1.21.11 | 21 | Older compatible client |
-| [`main`](https://github.com/usernamelocker/chesttrackermultiplayersync/tree/main) | 26.2 | 25 | Latest-code alias retained for existing Portainer stacks |
-
-The three version branches preserve their matching client builds. `26.2` is
-the GitHub default and primary development branch. `main` follows the latest
-26.2 code so existing VPS repository references keep working. Server runtime
-and deployment files are shared across all branches, not tied to a game version.
-- New releases should identify 26.2 as primary and include a 26.2 jar and
-  `SHA256SUMS.txt`. Keep older compatible jars available, clearly labeled by
-  Minecraft version. The build output is `mod/build/libs/chesttracker-*.jar`;
-  its filename includes the Minecraft version. Use the jar without `-sources`.
-- Validation results and remaining in-game checks are recorded in
-  [TESTING.md](docs/TESTING.md#262-port-validation-2026-10-27).
-- Required external mods: Fabric API and YACL for **26.2**. Where Is It and
-  Searchables are bundled. Optional integrations need their own 26.2 releases.
-- Redeploy the server stack when server runtime or deployment files change;
-  documentation and test changes alone do not need a redeploy. Server-only
-  fixes do not require new client logic.
-
-### VPS deployment for the 26.2 client update
-
-Keep Portainer on `refs/heads/main` with its existing compose path, environment
-variables, stack name, ports, and named volumes. `26.2` becoming GitHub's
-default branch does not require changing the VPS reference. The server runtime
-and Docker files retain the previously deployed `main` behavior across all
-version branches, including the coordinate-free website read view.
-
-Updating players to 26.2 requires no VPS rebuild or database migration. One
-protocol-v2 server serves 1.21.11, 26.1.2, and 26.2 simultaneously. Existing older
-jars remain available. For future server fixes, keep the shared runtime and
-deployment files synchronized across the version branches and `main`. See
-[Portainer upgrade guidance](server/PORTAINER.md#upgrading-clients-to-minecraft-262).
-
-Compatibility means shared item search, observations, tombstones, overrides,
-and wipe generations across releases. A client can only display items and
-components its game understands. Portable data preserves foreign values when
-supported by the receiving release; older jars that predate the portable format
-can only offer their existing fallback behavior. See the
-[three-version test checklist](docs/TESTING.md#cross-version-12111--2612--262).
 
 ## License
 
-The mod links against ChestTracker upstream under LGPL-3.0; see
-[mod/LICENSE](mod/LICENSE).
+Upstream LGPL-3.0 terms are preserved; see [mod/LICENSE](mod/LICENSE).

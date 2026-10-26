@@ -6,6 +6,10 @@ are Minecraft `26.2` (primary), `26.1.2`, and `1.21.11`. The 26.2 port keeps
 protocol v2 and the portable envelope version unchanged; no server migration
 is required for the game version alone.
 
+`26.2` is the primary/default source branch; the three version branches share
+one server implementation. See [Downloads](../docs/RELEASES.md) and
+[server setup](../server/START-HERE.md).
+
 The server stores opaque item data and does not interpret Minecraft codecs. The
 cross-version item format is specified separately in
 [normalization.md](normalization.md).

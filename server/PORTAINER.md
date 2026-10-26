@@ -1,70 +1,74 @@
 # Portainer operations
 
-Setup path is [`START-HERE.md`](START-HERE.md) (Stack from Repository + env table).
-This file is the operations companion.
+Minecraft 26.2 is the primary client target. One shared server serves 26.2,
+26.1.2, and 1.21.11; its files are identical on all three version branches.
 
-## Stack shape
+## Repository settings
 
-* Build method: **Repository** → repo URL, reference `refs/heads/main`, compose path
-  `server/docker-compose.yml`, authentication ON (private repo).
-* Compose builds `./Dockerfile`, publishes `7000→8000`, data in named volumes
-  `cmsync-data` (SQLite) and `cmsync-backups` (file backups) — both survive updates.
-* Env vars (same names as `stack.env.example`): `EXPECTED_SERVER_ID`,
-  `SERVER_ID_ALIASES`, `WHITELIST_UUIDS` (empty in token mode), `SHARED_TOKEN`,
-  `ADMIN_TOKEN` (**different** password; `$$`-escape every `$`), plus tuning
-  (`SNAPSHOT_*`, `MAX_DELETE_*`, `RANGE_BLOCKS`, `TOMBSTONE_TTL_DAYS`).
+| Setting | Value |
+|---|---|
+| Repository | `https://github.com/usernamelocker/chesttrackermultiplayersync` |
+| Repository reference | `refs/heads/26.2` |
+| Compose path from repository root | `server/docker-compose.yml` |
+| Server directory / build context | `server/` (Docker Compose uses `build: .` there) |
+| Published port | Host `7000` to container `8000` |
+| Database volume | Existing `cmsync-data`, mounted at `/data` |
+| File-backup volume | Existing `cmsync-backups`, mounted at `/app/backups` |
 
-## Update / redeploy
+`26.2` is GitHub's default branch. The former `main` branch has been removed.
+If an existing stack explicitly references `main` or `refs/heads/main`, change
+only that repository reference to `refs/heads/26.2` before the next pull or
+redeploy. Selecting `/server` identifies a directory, not a branch. If your
+deployment already follows the repository default, confirm it resolves to 26.2.
 
-### Upgrading clients to Minecraft 26.2
+## Existing stack: keep the deployment intact
 
-This is a client update using the existing protocol v2. Keep the VPS stack on
-`refs/heads/main`. Players install the matching
-26.2 mod jar and its required Fabric dependencies; older players keep their
-matching older jars. No server redeploy or database migration is required for
-the game-version upgrade alone.
+Keep the same stack name, compose path, ports, environment variables, database
+path, tokens, server IDs, and named volumes. Portainer may prefix volume names
+with the stack name; reuse the existing volumes rather than creating a new stack.
+Do not remove data volumes as part of a client upgrade.
 
-GitHub's default branch is `26.2`; `main` is retained as the latest-code alias
-for existing deployments. The same server runtime and Docker configuration are
-maintained across `main`, `26.2`, `26.1.2`, and `1.21.11`. The branch names select
-client source targets; one server serves all supported clients simultaneously.
-This reorganization preserves the previously deployed `main` server behavior,
-including omission of coordinates from `/api/pullWebPage`.
+The server runtime and Docker configuration preserve the previous production
+behavior. This client release requires no server rebuild or database migration.
+Changing GitHub's default branch does not modify a running container.
 
-No Portainer reference change is needed. Leave the compose path, ports, tokens,
-server identifiers, volume names, and stack name unchanged. Preserve the
-existing data and backup volumes.
+Full environment reference: [stack.env.example](stack.env.example). Keep
+`ADMIN_TOKEN` separate from `SHARED_TOKEN`. Preserve configured server aliases.
 
-### Deploying a separately reviewed server update
+## Deploying a future server update
 
-The full environment reference is [`stack.env.example`](stack.env.example),
-including `FULL_WIPE_MIN_BANK`, which protects established banks from accidental
-full-bank delete pushes. Partial deletes are not blocked.
+Only server runtime or deployment changes require a rebuild; Markdown and test
+changes do not. Review the server diff, take a backup, then use the existing
+stack's **Update stack** operation with image rebuild enabled. A plain container
+restart keeps the old image. Confirm the repository reference is 26.2 first.
 
-Stacks → stack → **Update the stack WITH rebuild** (toggle it on). A plain
-container restart keeps the old code — rebuild pulls the new code from GitHub.
-Watch Containers → `cmsync` → **Logs** for `Uvicorn running`, then
-`http://VPS-IP:7000/health` → `{"ok":true,...}`.
+Check the container logs for `Uvicorn running`, then check
+`http://VPS-IP:7000/health`. No VPS action has been performed merely by
+publishing a client jar; an independently configured auto-update may still
+react to repository changes.
 
-## Diagnose from logs
+## Logs and recovery
 
-* `handshake DENIED <reason> player=<uuid> got=<id> want=<id>` — exact mismatch,
-  copy this line when reporting connect problems (usually token or serverId).
-* `pull DENIED ...` — same for pulls.
-* `MASS DELETE <server>: N deletes vs M stored by <uuid> (snapshot N)` — a big
-  break/empty wave applied; snapshot id is the undo point (`/api/restore`).
-* `WIPE <server> by <uuid>` — someone ran the two-step wipe.
-* `422 ... errors=[...]` — a client sent a malformed body (field + body logged).
+| Log / symptom | Meaning or action |
+|---|---|
+| `handshake DENIED` / `pull DENIED` | Check the exact server ID, alias, player UUID, or shared token in the log |
+| `FULL WIPE QUARANTINED` | An exact full-bank delete push was held; its snapshot is available for recovery |
+| `MASS DELETE` | A partial mass delete was snapshotted and applied |
+| `WIPE` | The confirmed admin wipe endpoint was used |
+| `422 ... errors=` | Inspect the rejected request field and validation error |
+| Client push HTTP 413 | Increase the reverse proxy's body limit; the example uses `20m` |
 
-## Backups in Docker
+For a filesystem backup, run `python /app/backup.py` in the container console;
+it writes into the existing backup volume. SQLite snapshots remain in the
+database volume. See [Backups and restore](../docs/BACKUPS.md).
 
-* Snapshots auto-write into SQLite (`cmsync-data` volume — survives restarts).
-* Filesystem `.backup`: Containers → `cmsync` → Console →
-  `python /app/backup.py` (writes into `cmsync-backups` volume).
-* Before big tests: Volumes → export `cmsync-data`.
-* Details + restore drill: [`../docs/BACKUPS.md`](../docs/BACKUPS.md).
+## Local checks
 
-## Local first
+From `server/`:
 
-`python -m pytest test_api.py test_server.py` in `server/` catches
-serverId/whitelist/merge mistakes in seconds, no deploy needed.
+```powershell
+python -m pytest test_api.py test_server.py test_portable_format.py test_cross_version.py
+```
+
+See [Server setup](START-HERE.md), [Server reference](README.md),
+[Downloads](../docs/RELEASES.md), and [Testing](../docs/TESTING.md).

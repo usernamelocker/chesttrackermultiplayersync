@@ -1,37 +1,23 @@
-# CMSync mod — Minecraft 26.1.2
+# CMSync client for Minecraft 26.1.2
 
-This branch builds the older Minecraft **26.1.2** Fabric client with **Java 25**.
-The primary client and GitHub default branch are `26.2`; `main` follows that
-latest code and remains the Portainer deployment reference.
+This is the older **Minecraft 26.1.2** Fabric client branch. Minecraft **26.2**
+is the primary release and default branch. The maintained version branches are
+`26.2`, `26.1.2`, and `1.21.11`; there is no separate `main` branch.
 
-| Branch | Minecraft | Java | Role |
-|---|---|---|---|
-| `26.2` | 26.2 | 25 | Default branch and primary client |
-| `26.1.2` | 26.1.2 | 25 | Older compatible client |
-| `1.21.11` | 1.21.11 | 21 | Older compatible client |
-| `main` | 26.2 | 25 | Latest-code alias for the existing VPS deployment |
+## Downloads
 
-## Shared server and compatibility
-
-All branches contain the same server runtime and Docker configuration. One
-protocol-v2 server serves all supported game versions. Keep Portainer on
-`refs/heads/main`; keep its stack name, compose path, ports, environment settings,
-and named volumes unchanged. A client upgrade does not require a database
-migration or VPS rebuild. Apply future shared server fixes to every branch.
-
-Install the jar and Fabric API/YACL releases that match your Minecraft version.
-The game binaries are not interchangeable. Portable `cmsync.item` v1 envelopes
-preserve component data understood by a peer; unknown items cannot be displayed
-by older games. Existing release binaries retain their original capabilities.
-See the [protocol](../protocol/PROTOCOL.md),
-[item format](../protocol/normalization.md), and
-[compatibility checks](../docs/TESTING.md).
+Use [Downloads and releases](../docs/RELEASES.md) for the matching 26.1.2 jar,
+source information, and checksums. The older compatibility jars in v2.9.0 are
+unchanged assets from v1.0.8; the new 2.9.0 implementation targets 26.2 only.
+Install the Fabric API and YACL versions appropriate for your older game.
+Do not install the 26.2 jar or a `-sources.jar` in this game profile.
 
 ## Build this older client
 
-Set `JAVA_HOME` to a JDK 25. This older build still resolves
-JackFredLib/Where Is It through GitHub Packages and requires a GitHub token
-with `read:packages`. The public-dependency build improvements are on `26.2`.
+Set `JAVA_HOME` to **JDK 25**. This older build still resolves
+JackFredLib/Where Is It through GitHub Packages and needs a GitHub token with
+`read:packages`. The public-dependency build improvements and six game-registry
+codec tests are on `26.2`.
 
 ```powershell
 cd mod
@@ -39,24 +25,31 @@ copy .env.example .env   # fill GITHUB_ACTOR and GITHUB_TOKEN locally
 .\gradlew.bat build --no-daemon
 ```
 
-Do not commit `.env`. Output jars are under `mod/build/libs/`; install the jar
-without `-sources`. The new game-registry codec tests are on `26.2`/`main`;
-server checks and the manual multiplayer matrix are in
-[TESTING.md](../docs/TESTING.md).
+Keep `.env` out of Git. Build output is under `mod/build/libs/`; select the jar
+without `-sources`. See [Testing](../docs/TESTING.md) for shared server checks
+and the manual cross-version matrix.
 
-## In-game use
+## Shared server and in-game setup
 
-Open the Memory Bank menu with the grave key, then configure the **Sync** tab
-with the shared server URL and token. **CM Settings** contains the sync interval,
-ender-chest and name options, notifications, and the separate admin token.
-`/cmsync status` reports sync state. `/cmsync stop` disconnects and forgets the
-connection. `/cmsync wipealldata` is an intentional, confirmed admin wipe;
-ordinary suspected full-bank deletes remain quarantined by the shared server.
+All three branches contain identical `server/` files. One protocol-v2 server
+serves all clients. Portainer uses `refs/heads/26.2`, directory `server/`, and
+compose path `server/docker-compose.yml`. Keep existing settings and volumes.
+A client upgrade requires no server-code or database migration.
 
-See the [repository README](../README.md),
-[Portainer guide](../server/PORTAINER.md), and
-[upstream feature overview](README.md).
+Configure the Memory Bank menu's **Sync** tab with the server URL and shared
+token. The separate admin token belongs in **CM Settings**, not in Sync.
+`/cmsync status` reports state; `/cmsync stop` disconnects. The confirmed
+`/cmsync wipealldata` command intentionally wipes shared data and requires admin
+access. Ordinary suspected full-bank delete pushes remain quarantined.
 
-## License
+Older games cannot display unknown newer items. Existing release binaries
+retain their original portable-data/fallback behavior. See
+[Protocol v2](../protocol/PROTOCOL.md),
+[item format](../protocol/normalization.md),
+[access settings](../docs/TOKENS.md), and
+[Portainer operations](../server/PORTAINER.md).
 
-The upstream LGPL-3.0 terms are preserved; see [LICENSE](LICENSE).
+## References and license
+
+[Repository overview](../README.md) · [Upstream features](README.md) ·
+[LGPL license](LICENSE)

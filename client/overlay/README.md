@@ -4,7 +4,7 @@ Early in the project the sync client was developed as a patch copied into a loca
 QMSync checkout. That flow is obsolete: **`mod/` is the full buildable source and
 the source of truth** (see [`mod/CMSYNC.md`](../../mod/CMSYNC.md)).
 
-The patch copies and per-version porting notes that used to live here
-(`src/`, `docs/APPLY.md`, `docs/PORTING-26x.md`, `scripts/apply-overlay.ps1`)
-were removed — they were stale and misleading. Git history still has them if
-you ever need archaeology.
+Minecraft 26.2 is the primary version; use the `26.2` branch and the
+[release downloads](../../docs/RELEASES.md). Any overlay files retained in an
+older version branch are historical copies only. Git history also preserves
+removed patch copies and old porting notes; do not use them to build the mod.
